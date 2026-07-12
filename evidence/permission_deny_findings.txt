@@ -1,0 +1,8 @@
+PERMISSION-DENY (READ) FINDINGS — grok 0.2.93 SuperGrok, 2026-07-12T14:13Z
+
+Q: does the permission-deny READ setting work?
+1. CLI flag --deny "Read(FILE)": BLOCKS the agent reading FILE (Channel A / /v1/responses). Works even with --always-approve. Grok reply: "Access ... blocked by a permission policy (both the file reader and shell were rejected)."
+2. Settings FILE (.claude/settings.json or .grok/settings.json, {"permissions":{"deny":["Read(FILE)"]}}): grok inspect resolves it as the permission Source. It BLOCKS the read in normal permission mode (--permission-mode default). BUT --always-approve BYPASSES the settings-file deny (file read+sent anyway). Rule pattern must match: Read(FILE)/Read(**/FILE) work; Read(./FILE) may not.
+3. Files grok reads settings from: .grok/settings.json, .claude/settings.json, .claude/settings.local.json (reads BOTH grok and Claude Code settings).
+
+CRITICAL (robust in every test): the deny is a READ control, NOT an UPLOAD control. Even when the READ is blocked, a TRACKED file (incl a tracked secrets file, e.g. tracked_secret.txt containing CANARY-DENYTRACK-SECRET-7B3M) is STILL uploaded in the whole-repo git bundle (Channel B, POST /v1/storage 200). Only GITIGNORING a file keeps it out of the bundle (untracked). Evidence: uploaded_repo_deny_gitignore.bundle (gitignored .env excluded) vs the tracked-secret runs (tracked file present in bundle despite deny).
