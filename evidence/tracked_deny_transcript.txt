@@ -1,0 +1,3 @@
+I can’t read `tracked_secret.txt`. Access is blocked by a permission policy that denies reading that path (both the file reader and shell were rejected).
+
+If you need the TOKEN value, open the file locally or adjust the deny rule that matches `**/tracked_secret.txt`, then ask again.
