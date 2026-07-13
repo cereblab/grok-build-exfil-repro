@@ -17,9 +17,9 @@ opt-out →  {"codingDataRetentionOptOut": true}
 opt-in  →  {"codingDataRetentionOptOut": false}
 ```
 
-It is **one** account flag (`codingDataRetentionOptOut`). It does **not** independently toggle `trace_upload_enabled` or `disable_codebase_upload` (those are server-wide and already off).
+It is **one** account flag (`codingDataRetentionOptOut`). It does **not** independently toggle `trace_upload_enabled` or `disable_codebase_upload` (those are set server-side and were already off for this account).
 
-## A/B result — the only difference is one status code
+## A/B result — same requests, one status-code difference
 
 Same task, leader restarted between runs to force a fresh `/v1/settings` fetch:
 
@@ -34,7 +34,7 @@ Same task, leader restarted between runs to force a fresh `/v1/settings` fetch:
 
 ## Conclusion
 
-**`/privacy opt-out` does not change what leaves your machine.** Your session traces are **POSTed to xAI in full in both states** (the opt-out bodies are even slightly larger); the model turns and telemetry are identical. The **only** observable effect is the server's response on `/v1/traces`: **`200` (stored) when opted in → `204` No Content (discarded) when opted out**.
+**`/privacy opt-out` does not change what leaves your machine.** Your session traces are **POSTed to xAI in full in both states** (the opt-out trace bodies are even slightly larger); the model turns and telemetry are the same. The one consistent, meaningful difference is the server's response on `/v1/traces`: **`200` (stored) when opted in → `204` No Content (discarded) when opted out**. (One minor session-streaming call — `POST /v1/sessions/…/turn-deltas` — fired once in the opt-in run and not the opt-out run; from a single run-pair I can't attribute that to the toggle rather than streaming-timing variance, and it carries no file or repo content.)
 
 So it is a **server-side retention switch, not a client-side transmission block.** You still transmit everything; you are trusting xAI's server to *discard* the opted-out traces rather than *store* them — verifiable only by that `204` status, not by anything staying on your machine.
 
