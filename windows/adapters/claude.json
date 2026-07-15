@@ -1,0 +1,42 @@
+{
+  "schema_version": "egress-adapter/v1",
+  "product_name": "Claude Code",
+  "vendor": "Anthropic",
+  "client_surface": "CLI",
+  "executable": "claude",
+  "version_command": ["--version"],
+  "noninteractive_command_template": [
+    "--add-dir", "{working_directory}",
+    "--permission-mode", "plan",
+    "--output-format", "json",
+    "--max-turns", "10",
+    "-p", "{prompt}"
+  ],
+  "environment_variables": {
+    "HTTP_PROXY": "http://127.0.0.1:{proxy_port}",
+    "HTTPS_PROXY": "http://127.0.0.1:{proxy_port}",
+    "SSL_CERT_FILE": "{ca_certificate}",
+    "NODE_EXTRA_CA_CERTS": "{ca_certificate}"
+  },
+  "timeout_seconds": 300,
+  "expected_vendor_hosts": [
+    "api.anthropic.com",
+    "statsig.anthropic.com",
+    "sentry.io"
+  ],
+  "authentication_mode": "UNVERIFIED: do not authenticate or inspect credentials during offline preparation",
+  "model_identifier": null,
+  "approval_mode": "documented plan mode; local behavior UNVERIFIED",
+  "sandbox_mode": "UNVERIFIED; no sandbox flag is assumed in the template",
+  "notes": [
+    "The executable path, installed version, authentication state, proxy routing, certificate trust, and command behavior are UNVERIFIED.",
+    "The official CLI documents --add-dir, --permission-mode, --output-format, --max-turns, and -p. This template must be checked with local --help after approved installation.",
+    "Anthropic documents HTTP_PROXY, HTTPS_PROXY, SSL_CERT_FILE, and NODE_EXTRA_CA_CERTS; successful interception and CA trust still require empirical validation.",
+    "Anthropic documents that Claude Code does not support NO_PROXY and does not support SOCKS proxies."
+  ],
+  "limitations": [
+    "No Claude executable has been installed, authenticated, invoked, or observed by this harness.",
+    "The official documentation reviewed does not provide a standalone noninteractive authentication-status command; authentication state is UNVERIFIED.",
+    "Anthropic documents native Windows operation through Git Bash or WSL; generic PowerShell runner compatibility requires offline command validation after approved installation."
+  ]
+}
