@@ -17,6 +17,9 @@ CAPTURE_STATUSES = (
     "TLS_INTERCEPTION_FAILED",
     "DIRECT_BYPASS_DETECTED",
     "NO_AGENT_TRAFFIC_OBSERVED",
+    "CAPTURE_START_FAILED",
+    "CLIENT_EXECUTION_FAILED",
+    "CAPTURE_FAILED",
     "NOT_EVALUATED",
 )
 MISSING_CANARY_LANGUAGE = (
@@ -47,19 +50,85 @@ def _assert_no_prohibited_conclusions(report: dict[str, Any]) -> None:
 
 def build_report(
     run_directory: Path,
-    derived_directory: Path,
+    analysis_directory: Path,
     capture_status: str = "NOT_EVALUATED",
+    *,
+    control_directory: Path | None = None,
+    report_directory: Path | None = None,
 ) -> dict[str, Any]:
     if capture_status not in CAPTURE_STATUSES:
         raise ValueError(f"Unsupported capture status: {capture_status}")
+    run_directory = run_directory.resolve()
+    analysis_directory = analysis_directory.resolve()
+    control_directory = (control_directory or analysis_directory).resolve()
+    report_directory = (report_directory or analysis_directory).resolve()
+    output_root = (
+        analysis_directory.parent
+        if analysis_directory.parent == control_directory.parent == report_directory.parent
+        else report_directory
+    )
     manifest = _read_json(run_directory / "evidence-manifest.json", {})
-    extraction = _read_json(derived_directory / "extraction-result.json", {})
-    classification = _read_json(derived_directory / "classification.json", {})
-    git_validation = _read_json(derived_directory / "git-validation.json", {})
+    extraction = _read_json(analysis_directory / "extraction-result.json", {})
+    classification = _read_json(analysis_directory / "classification.json", {})
+    git_validation = _read_json(analysis_directory / "git-validation.json", {})
+    coverage = _read_json(control_directory / "coverage.json", {})
+    client_execution = _read_json(control_directory / "client-execution.json", {})
+    version_correction = _read_json(control_directory / "client-version-correction.json", {})
+    if not version_correction:
+        version_correction = _read_json(analysis_directory / "client-version-correction.json", {})
+    if version_correction:
+        client_execution = {**client_execution, **version_correction}
+    capture_outcome = _read_json(control_directory / "capture-outcome.json", {})
+    if capture_outcome:
+        capture_status = str(capture_outcome["final_status"])
     canary_findings = classification.get("canary_findings", [])
+    http_request_count = int(
+        coverage.get("http_request_count", coverage.get("total_request_count", 0)) or 0
+    )
+    websocket_message_count = int(
+        coverage.get(
+            "websocket_message_count",
+            coverage.get("total_websocket_message_count", 0),
+        )
+        or 0
+    )
+    http_request_bytes = int(
+        coverage.get("http_request_bytes", coverage.get("total_raw_request_bytes", 0))
+        or 0
+    )
+    websocket_message_bytes = int(
+        coverage.get(
+            "websocket_message_bytes",
+            coverage.get("total_raw_websocket_bytes", 0),
+        )
+        or 0
+    )
+    client_launched = bool(
+        coverage.get("client_launched", client_execution.get("started", False))
+    )
+    proxy_started = bool(
+        coverage.get("proxy_started", coverage.get("mitmproxy_started", False))
+    )
+    monitoring_started = bool(coverage.get("monitoring_started", False))
     report: dict[str, Any] = {
         "schema_version": REPORT_SCHEMA,
         "capture_status": capture_status,
+        "client_version": client_execution.get("normalized_client_version") or client_execution.get("client_version"),
+        "capture_outcome": capture_outcome,
+        "output_layout": {
+            "output_root": str(output_root),
+            "control_directory": str(control_directory),
+            "raw_directory": str(run_directory / "raw"),
+            "analysis_directory": str(analysis_directory),
+            "report_directory": str(report_directory),
+        },
+        "http_request_count": http_request_count,
+        "websocket_message_count": websocket_message_count,
+        "http_request_bytes": http_request_bytes,
+        "websocket_message_bytes": websocket_message_bytes,
+        "client_launched": client_launched,
+        "proxy_started": proxy_started,
+        "monitoring_started": monitoring_started,
         "run_metadata": {
             "run_id": manifest.get("run_id"),
             "capture_start_timestamp": manifest.get("capture_start_timestamp"),
@@ -85,6 +154,8 @@ def build_report(
         ),
         "git_candidate_findings": classification.get("git_candidates", []),
         "git_validation_results": git_validation,
+        "client_execution": client_execution,
+        "capture_coverage": coverage,
         "limitations": [
             "A canary match proves only that the matched bytes appeared in the inspected evidence layer; it does not establish how those bytes were obtained.",
             "An ignored-file or historical canary match does not establish that the complete file or Git object database was transmitted.",
@@ -97,11 +168,18 @@ def build_report(
             "GUI and CLI surfaces can route traffic differently and require separate future tests.",
             "Absence of a tested canary is not proof that other content was absent from traffic.",
         ],
-        "untested_assumptions": [
-            "Phase 2 does not execute or evaluate any vendor product.",
-            "Direct proxy bypass and TLS interception coverage are not evaluated in Phase 2.",
-            "Unsupported or unsuccessfully decoded layers may contain content that this pipeline cannot classify.",
-        ],
+        "untested_assumptions": (
+            [
+                *coverage.get("limitations", []),
+                "Unsupported or unsuccessfully decoded layers may contain content that this pipeline cannot classify.",
+            ]
+            if client_execution
+            else [
+                "Phase 2 does not execute or evaluate any vendor product.",
+                "Direct proxy bypass and TLS interception coverage are not evaluated in Phase 2.",
+                "Unsupported or unsuccessfully decoded layers may contain content that this pipeline cannot classify.",
+            ]
+        ),
     }
     _assert_no_prohibited_conclusions(report)
     return report
@@ -113,8 +191,16 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         f"- Schema: `{report['schema_version']}`",
         f"- Capture status: `{report['capture_status']}`",
+        f"- Final status reason: `{report['capture_outcome'].get('final_status_reason')}`",
         f"- Run ID: `{report['run_metadata'].get('run_id')}`",
         f"- Evidence integrity valid: `{report['evidence_integrity'].get('valid')}`",
+        f"- HTTP requests: `{report['http_request_count']}`",
+        f"- WebSocket messages: `{report['websocket_message_count']}`",
+        f"- HTTP request bytes: `{report['http_request_bytes']}`",
+        f"- WebSocket message bytes: `{report['websocket_message_bytes']}`",
+        f"- Client launched: `{report['client_launched']}`",
+        f"- Proxy started: `{report['proxy_started']}`",
+        f"- Monitoring started: `{report['monitoring_started']}`",
         "",
         "## Run metadata",
         "",
@@ -144,6 +230,38 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- Processing limits reached: {len(report['processing_limits_reached'])}",
         "",
     ]
+    if report["client_execution"] or report["capture_coverage"]:
+        client = report["client_execution"]
+        coverage = report["capture_coverage"]
+        lines.extend(
+            [
+                "## Client execution and capture coverage",
+                "",
+                f"- Product: `{client.get('product')}`",
+                f"- Client version: `{client.get('client_version')}`",
+                f"- Version command: `{client.get('version_command')}`",
+                f"- Version exit code: `{client.get('version_exit_code')}`",
+                f"- Launcher exit code: `{report['capture_outcome'].get('launcher_exit_code')}`",
+                f"- mitmdump exit code: `{report['capture_outcome'].get('mitmdump_exit_code')}`",
+                f"- Lifecycle status: `{report['capture_outcome'].get('launcher_final_status')}`",
+                f"- Shutdown error classification: `{report['capture_outcome'].get('shutdown_error_classification')}`",
+                f"- Model identifier: `{coverage.get('model_identifier_observed') or client.get('model_identifier')}`",
+                f"- Prompt: `{client.get('prompt')}`",
+                f"- Exit code: `{client.get('exit_code')}`",
+                f"- Timed out: `{client.get('timed_out')}`",
+                f"- Authentication failed: `{client.get('authentication_failed')}`",
+                f"- Requests captured: `{report['http_request_count']}`",
+                f"- WebSocket messages captured: `{report['websocket_message_count']}`",
+                f"- Raw request bytes: `{report['http_request_bytes']}`",
+                f"- Raw WebSocket bytes: `{report['websocket_message_bytes']}`",
+                f"- Decrypted readable request body observed: `{coverage.get('decrypted_readable_request_body')}`",
+                f"- Direct bypass status: `{coverage.get('direct_bypass_status')}`",
+                f"- Process monitoring complete: `{coverage.get('process_monitoring_complete')}`",
+                f"- Parent process ID: `{coverage.get('parent_process_id')}`",
+                f"- Hosts contacted: `{', '.join(coverage.get('hosts_contacted', []))}`",
+                "",
+            ]
+        )
     if report["decoding_operations"]:
         lines.extend(["### Decoding operations", ""])
         for operation in report["decoding_operations"]:
@@ -211,12 +329,23 @@ def render_markdown(report: dict[str, Any]) -> str:
 
 def generate_reports(
     run_directory: Path,
-    derived_directory: Path,
+    analysis_directory: Path,
     capture_status: str = "NOT_EVALUATED",
+    *,
+    control_directory: Path | None = None,
+    report_directory: Path | None = None,
 ) -> tuple[Path, Path]:
-    report = build_report(run_directory, derived_directory, capture_status)
-    json_path = derived_directory / "report.json"
-    markdown_path = derived_directory / "report.md"
+    report_directory = report_directory or analysis_directory
+    report_directory.mkdir(parents=True, exist_ok=True)
+    report = build_report(
+        run_directory,
+        analysis_directory,
+        capture_status,
+        control_directory=control_directory,
+        report_directory=report_directory,
+    )
+    json_path = report_directory / "report.json"
+    markdown_path = report_directory / "report.md"
     write_json_atomic(json_path, report)
     markdown_path.write_text(render_markdown(report), encoding="utf-8", newline="\n")
     return json_path, markdown_path
@@ -225,11 +354,17 @@ def generate_reports(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_directory", type=Path)
-    parser.add_argument("derived_directory", type=Path)
+    parser.add_argument("analysis_directory", type=Path)
+    parser.add_argument("--control-directory", type=Path)
+    parser.add_argument("--report-directory", type=Path)
     parser.add_argument("--capture-status", choices=CAPTURE_STATUSES, default="NOT_EVALUATED")
     args = parser.parse_args()
     json_path, markdown_path = generate_reports(
-        args.run_directory, args.derived_directory, args.capture_status
+        args.run_directory,
+        args.analysis_directory,
+        args.capture_status,
+        control_directory=args.control_directory,
+        report_directory=args.report_directory,
     )
     print(json.dumps({"json_report": str(json_path), "markdown_report": str(markdown_path)}))
     return 0

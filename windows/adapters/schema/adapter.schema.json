@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/egress-harness/adapter.schema.json",
+  "title": "Windows egress harness adapter",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "product_name",
+    "vendor",
+    "client_surface",
+    "executable",
+    "version_command",
+    "noninteractive_command_template",
+    "environment_variables",
+    "timeout_seconds",
+    "expected_vendor_hosts",
+    "authentication_mode",
+    "model_identifier",
+    "approval_mode",
+    "sandbox_mode",
+    "notes",
+    "limitations"
+  ],
+  "properties": {
+    "schema_version": { "const": "egress-adapter/v1" },
+    "product_name": { "type": "string", "minLength": 1 },
+    "vendor": { "type": "string", "minLength": 1 },
+    "client_surface": { "type": "string", "minLength": 1 },
+    "executable": { "type": "string", "minLength": 1 },
+    "version_command": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "noninteractive_command_template": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "environment_variables": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+      "additionalProperties": { "type": "string" }
+    },
+    "timeout_seconds": { "type": "integer", "minimum": 1, "maximum": 3600 },
+    "expected_vendor_hosts": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "authentication_mode": { "type": "string", "minLength": 1 },
+    "model_identifier": { "type": ["string", "null"] },
+    "approval_mode": { "type": "string", "minLength": 1 },
+    "sandbox_mode": { "type": "string", "minLength": 1 },
+    "notes": { "type": "array", "items": { "type": "string" } },
+    "limitations": { "type": "array", "items": { "type": "string" } }
+  }
+}

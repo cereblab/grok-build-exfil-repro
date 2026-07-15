@@ -3,8 +3,9 @@
 This directory contains a Windows-first, vendor-neutral harness for creating a
 deterministic Git canary repository, preserving HTTP and supported WebSocket
 payload evidence through mitmproxy, and analyzing copies of that evidence
-offline. Phase 2 does not execute or evaluate any vendor product and contains no
-Grok, Codex, Gemini, Claude, Antigravity, or other vendor adapter.
+offline. Phase 2 does not execute or evaluate any vendor product. Phase 3A adds
+one Codex CLI adapter and keeps its live integration tests behind an explicit
+safety gate; it adds no other vendor adapter.
 
 Use the harness only with accounts, tools, and traffic you are authorized to
 inspect. Every canary is fake and deterministic; never put real credentials in
@@ -43,10 +44,20 @@ From `windows` with the virtual environment active:
 
 ```powershell
 pwsh -NoProfile -File .\tests\Test-CanaryRepository.ps1
+pwsh -NoProfile -File .\tests\Test-CaptureLifecycle.ps1
 python -m unittest discover -s .\tests -p 'test_*.py' -v
 ```
 
 Every test uses a temporary directory and requires no external network access.
+The lifecycle suite uses synthetic local mitmdump fixtures for startup failures.
+Its controlled real-mitmproxy smoke fixture creates a fresh temporary CA,
+imports that exact certificate into `CurrentUser\Root`, and verifies its removal
+before deleting the temporary output. It never uses or changes the persistent
+CA under `~/.mitmproxy`.
+
+Phase 3A adapter tests are included in that discovery command and remain fully
+offline. Live Codex runs are separate; see
+[`docs/CODEX_TEST_PROTOCOL.md`](docs/CODEX_TEST_PROTOCOL.md).
 
 ## Create the deterministic canary repository
 
@@ -82,11 +93,21 @@ In terminal 1:
 pwsh -NoProfile -File .\scripts\Start-EgressCapture.ps1
 ```
 
-The launcher verifies Python and mitmproxy, generates the mitmproxy CA when
-needed, imports it into `Cert:\CurrentUser\Root`, checks `127.0.0.1:8080`,
-creates a unique run directory, snapshots the addon, and starts `mitmdump` in
-the foreground. It does not require administrator privileges. Press Ctrl+C to
-stop the proxy and finalize the manifest.
+The launcher first creates a unique run directory, `run.json`, the startup
+journal, and durable mitmdump stdout/stderr logs. It then verifies Python and
+mitmproxy, generates the mitmproxy CA when needed, imports it into
+`Cert:\CurrentUser\Root`, checks `127.0.0.1:8080`, snapshots the addon, and
+starts `mitmdump` in the foreground. It does not require administrator
+privileges. Press Ctrl+C to stop the proxy and finalize the manifest.
+
+The launcher records each startup stage before and after execution. It does not
+publish `PROXY_RUNNING` until the selected process is alive and the loopback
+listener is reachable. On any startup failure, bounded cleanup stops the process
+tree if one was created, checks the port, and removes only the exact certificate
+newly imported by that run. The certificate files in the selected mitmproxy
+configuration directory are preserved. Current-user Root add/remove operations
+run through bounded `certutil.exe -user` subprocesses, with their stdout and
+stderr retained in the run directory.
 
 In terminal 2, configure only the authorized process under test:
 
@@ -108,19 +129,56 @@ A neutral smoke request is:
 Invoke-WebRequest -Uri 'https://example.com/' -Proxy $proxy | Select-Object StatusCode
 ```
 
-No vendor command is included by design.
+No vendor command is included in this manual-capture example.
+
+## Phase 3A Codex adapter
+
+The generic runner and the only current adapter are:
+
+- `scripts/Invoke-AgentCapture.ps1`
+- `adapters/codex.json`
+- `adapters/schema/adapter.schema.json`
+
+Preview the fixed Test A safety gate without launching Codex or mitmproxy:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Invoke-AgentCapture.ps1 -TestId A
+```
+
+The preview executes only the adapter's local version command. It records the
+exact command, stdout, stderr, exit code, executable path, and normalized
+version in the gate. Approval is rejected if either executable path or version
+differs when the gate is consumed. The vendor client command is not launched
+until the reviewed gate is explicitly approved.
 
 ## Raw evidence and the integrity manifest
 
 Each run contains:
 
 - `run.json`: run ID, environment versions, source commit, and local setup data.
+- `startup-journal.jsonl`: write-through before/after records for startup and cleanup stages.
+- `mitmdump.stdout.log` and `mitmdump.stderr.log`: durable native-process output.
+- `startup-failure.json`: exact process, port, certificate, exception, and cleanup state when startup fails.
 - `requests.jsonl`: sanitized HTTP request metadata.
 - `websockets.jsonl`: supported WebSocket-message metadata.
 - `raw/http/*.bin`: exact `flow.request.raw_content` bytes.
 - `raw/websocket/*.bin`: exact `WebSocketMessage.content` bytes exposed by mitmproxy.
 - `provenance/capture_requests.py`: the addon snapshot used for the run.
 - `evidence-manifest.json`: deterministic local integrity metadata.
+
+Derived output includes `capture-outcome.json` and `reconciled-run.json`. The
+former is the sole reportable final-status calculation; the latter preserves
+the original run metadata and complete journal history beside that reconciled
+state. A process exiting within a timeout is not called clean unless its exit
+code is also zero.
+
+A pre-client failure uses `CAPTURE_START_FAILED`, not
+`CLIENT_EXECUTION_FAILED`. It still produces the run metadata, journal, logs,
+failure record, manifest, and the normal derived `report.json`/`report.md` when
+the generic runner is used. Reports always state HTTP and WebSocket counts and
+bytes plus `client_launched`, `proxy_started`, and `monitoring_started`. Zero
+counts after a failed start mean only that this failed run recorded no raw
+traffic.
 
 HTTP metadata records timestamp, sequence, method, scheme, host, port,
 query-free path, content type, content/transfer encodings, byte length, SHA-256,
@@ -160,15 +218,21 @@ traffic used WebSockets.
 
 ## Run offline analysis
 
-Stop capture first, verify the manifest, and then create a separate derived
-directory:
+Stop capture first, verify the manifest, and then create a new versioned output
+root. Raw evidence remains in `captures/<run-id>/raw/`; it is never copied into
+or rewritten by offline analysis. The output root separates run control records
+in `control/`, extraction and classification artifacts in the initially empty
+`analysis/`, and final reports in `report/`.
 
 ```powershell
 pwsh -NoProfile -File .\scripts\Invoke-EvidenceAnalysis.ps1 `
   -RunDirectory .\captures\<run-id> `
-  -DerivedDirectory .\analysis-output\<run-id> `
+  -OutputRoot .\analysis-output\<run-id>-v1 `
   -ExpectedCanaryRepository .\canary-repository
 ```
+
+Use a new versioned output root for a repeat analysis. Existing control files
+therefore cannot make the dedicated `analysis/` directory non-empty.
 
 The stages are separate modules under `analysis`:
 

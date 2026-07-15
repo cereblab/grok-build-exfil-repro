@@ -89,6 +89,8 @@ class ExtractionEngine:
         run_directory: Path,
         derived_directory: Path,
         limits: ExtractionLimits | None = None,
+        *,
+        allow_agent_control_files: bool = False,
     ) -> None:
         self.run_directory = run_directory.resolve()
         self.derived_directory = derived_directory.resolve()
@@ -98,10 +100,13 @@ class ExtractionEngine:
             self.run_directory
         ):
             raise ValueError("Derived evidence must be outside the raw run directory.")
-        if self.derived_directory.exists() and any(self.derived_directory.iterdir()):
-            raise FileExistsError(
-                f"Refusing to reuse a non-empty derived directory: {self.derived_directory}"
-            )
+        if self.derived_directory.exists():
+            existing = {item.name for item in self.derived_directory.iterdir()}
+            allowed = {"control", "coverage.json", "client-execution.json"}
+            if existing and not (allow_agent_control_files and existing <= allowed):
+                raise FileExistsError(
+                    f"Refusing to reuse a non-empty derived directory: {self.derived_directory}"
+                )
         self.artifact_directory = self.derived_directory / "artifacts"
         self.artifact_directory.mkdir(parents=True, exist_ok=True)
         self.result: dict[str, Any] = {
@@ -600,8 +605,15 @@ def extract_run(
     run_directory: Path,
     derived_directory: Path,
     limits: ExtractionLimits | None = None,
+    *,
+    allow_agent_control_files: bool = False,
 ) -> dict[str, Any]:
-    return ExtractionEngine(run_directory, derived_directory, limits).run()
+    return ExtractionEngine(
+        run_directory,
+        derived_directory,
+        limits,
+        allow_agent_control_files=allow_agent_control_files,
+    ).run()
 
 
 def main() -> int:
@@ -613,6 +625,11 @@ def main() -> int:
     parser.add_argument("--maximum-derived-artifacts", type=int, default=1_000)
     parser.add_argument("--maximum-size-per-derived-artifact", type=int, default=16 * 1024 * 1024)
     parser.add_argument("--decompression-ratio-limit", type=float, default=100.0)
+    parser.add_argument(
+        "--allow-agent-control-files",
+        action="store_true",
+        help="Permit only control/, coverage.json, and client-execution.json in a newly reserved Phase 3 derived directory.",
+    )
     parser.add_argument("--base64-minimum-decoded-length", type=int, default=12)
     args = parser.parse_args()
     limits = ExtractionLimits(
@@ -623,7 +640,12 @@ def main() -> int:
         decompression_ratio_limit=args.decompression_ratio_limit,
         base64_minimum_decoded_length=args.base64_minimum_decoded_length,
     )
-    result = extract_run(args.run_directory, args.derived_directory, limits)
+    result = extract_run(
+        args.run_directory,
+        args.derived_directory,
+        limits,
+        allow_agent_control_files=args.allow_agent_control_files,
+    )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 

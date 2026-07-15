@@ -6,6 +6,16 @@
   "required": [
     "schema_version",
     "capture_status",
+    "client_version",
+    "capture_outcome",
+    "output_layout",
+    "http_request_count",
+    "websocket_message_count",
+    "http_request_bytes",
+    "websocket_message_bytes",
+    "client_launched",
+    "proxy_started",
+    "monitoring_started",
     "run_metadata",
     "evidence_integrity",
     "raw_files_processed",
@@ -27,9 +37,51 @@
         "TLS_INTERCEPTION_FAILED",
         "DIRECT_BYPASS_DETECTED",
         "NO_AGENT_TRAFFIC_OBSERVED",
+        "CAPTURE_START_FAILED",
+        "CLIENT_EXECUTION_FAILED",
+        "CAPTURE_FAILED",
         "NOT_EVALUATED"
       ]
     },
+    "client_version": {"type": ["string", "null"]},
+    "capture_outcome": {
+      "type": "object",
+      "properties": {
+        "final_status": {"type": "string"},
+        "launcher_exit_code": {"type": ["integer", "null"]},
+        "mitmdump_exit_code": {"type": ["integer", "null"]},
+        "launcher_final_status": {"type": "string"},
+        "shutdown_error_observed": {"type": "boolean"},
+        "shutdown_error_classification": {"type": "string"},
+        "capture_integrity_affected": {"type": ["boolean", "null"]},
+        "final_status_reason": {"type": "string"}
+      }
+    },
+    "output_layout": {
+      "type": "object",
+      "required": [
+        "output_root",
+        "control_directory",
+        "raw_directory",
+        "analysis_directory",
+        "report_directory"
+      ],
+      "properties": {
+        "output_root": {"type": "string"},
+        "control_directory": {"type": "string"},
+        "raw_directory": {"type": "string"},
+        "analysis_directory": {"type": "string"},
+        "report_directory": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "http_request_count": {"type": "integer", "minimum": 0},
+    "websocket_message_count": {"type": "integer", "minimum": 0},
+    "http_request_bytes": {"type": "integer", "minimum": 0},
+    "websocket_message_bytes": {"type": "integer", "minimum": 0},
+    "client_launched": {"type": "boolean"},
+    "proxy_started": {"type": "boolean"},
+    "monitoring_started": {"type": "boolean"},
     "run_metadata": {"type": "object"},
     "evidence_integrity": {"type": "object"},
     "raw_files_processed": {"type": "array"},
@@ -42,6 +94,8 @@
     "canary_summary": {"type": "string"},
     "git_candidate_findings": {"type": "array"},
     "git_validation_results": {"type": "object"},
+    "client_execution": {"type": "object"},
+    "capture_coverage": {"type": "object"},
     "limitations": {"type": "array", "items": {"type": "string"}},
     "untested_assumptions": {"type": "array", "items": {"type": "string"}}
   },

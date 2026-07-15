@@ -104,6 +104,9 @@ class RequestEvidenceRecorderTests(unittest.TestCase):
         self.assertEqual("application/octet-stream", record["content_type"])
         self.assertEqual("gzip", record["content_encoding"])
         self.assertEqual("chunked", record["transfer_encoding"])
+        self.assertIsNone(record["declared_content_length"])
+        self.assertTrue(record["raw_content_available"])
+        self.assertIsNone(record["body_truncated"])
         self.assertEqual(len(body), record["body_size"])
         self.assertEqual(expected_hash, record["body_sha256"])
         self.assertEqual(body, (self.capture_directory / record["raw_body_file"]).read_bytes())
@@ -111,6 +114,21 @@ class RequestEvidenceRecorderTests(unittest.TestCase):
         self.assertNotIn(b"MUST-NOT-BE-STORED", metadata_bytes)
         self.assertNotIn(b"authorization", metadata_bytes.lower())
         self.assertNotIn(b"cookie", metadata_bytes.lower())
+
+    def test_content_length_records_explicit_nontruncation_or_truncation(self) -> None:
+        complete = SimpleNamespace(
+            id="complete",
+            request=self._request(raw_content=b"four", headers={"content-length": "4"}),
+        )
+        truncated = SimpleNamespace(
+            id="truncated",
+            request=self._request(raw_content=b"two", headers={"content-length": "4"}),
+        )
+        self.recorder.request(complete)
+        self.recorder.request(truncated)
+        records = [json.loads(line) for line in (self.capture_directory / "requests.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertFalse(records[0]["body_truncated"])
+        self.assertTrue(records[1]["body_truncated"])
 
     def test_websocket_text_binary_directions_sequences_and_empty_payload(self) -> None:
         messages: list[WebSocketMessage] = []

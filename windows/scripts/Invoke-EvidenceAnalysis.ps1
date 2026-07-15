@@ -8,7 +8,7 @@ param(
 
     [Parameter(Mandatory)]
     [ValidateNotNullOrEmpty()]
-    [string] $DerivedDirectory,
+    [string] $OutputRoot,
 
     [Parameter(Mandatory)]
     [ValidateNotNullOrEmpty()]
@@ -32,7 +32,21 @@ param(
 
     [Parameter()]
     [ValidateRange(0.01, 1000000.0)]
-    [double] $DecompressionRatioLimit = 100.0
+    [double] $DecompressionRatioLimit = 100.0,
+
+    [Parameter()]
+    [ValidateSet(
+        'CAPTURE_VALIDATED',
+        'PARTIAL_CAPTURE',
+        'TLS_INTERCEPTION_FAILED',
+        'DIRECT_BYPASS_DETECTED',
+        'NO_AGENT_TRAFFIC_OBSERVED',
+        'CAPTURE_START_FAILED',
+        'CLIENT_EXECUTION_FAILED',
+        'CAPTURE_FAILED',
+        'NOT_EVALUATED'
+    )]
+    [string] $CaptureStatus = 'NOT_EVALUATED'
 )
 
 Set-StrictMode -Version Latest
@@ -68,9 +82,19 @@ function Invoke-AnalysisStage {
 }
 
 try {
-    Invoke-AnalysisStage -Module 'analysis.extract_payloads' -Arguments @(
+    $layoutOutput = @(& $pythonCommand.Source -m analysis.output_layout $OutputRoot 2>&1)
+    $layoutExitCode = $LASTEXITCODE
+    if ($layoutExitCode -ne 0) {
+        throw "Output layout preparation failed with exit code $layoutExitCode. $($layoutOutput -join [Environment]::NewLine)"
+    }
+    $layout = ($layoutOutput -join [Environment]::NewLine) | ConvertFrom-Json
+    $analysisDirectory = [string] $layout.analysis_directory
+    $controlDirectory = [string] $layout.control_directory
+    $reportDirectory = [string] $layout.report_directory
+
+    $extractionArguments = @(
         $RunDirectory,
-        $DerivedDirectory,
+        $analysisDirectory,
         '--maximum-extraction-depth', $MaximumExtractionDepth.ToString(),
         '--maximum-total-expanded-bytes', $MaximumTotalExpandedBytes.ToString(),
         '--maximum-derived-artifacts', $MaximumDerivedArtifacts.ToString(),
@@ -79,18 +103,23 @@ try {
             [System.Globalization.CultureInfo]::InvariantCulture
         )
     )
+    Invoke-AnalysisStage -Module 'analysis.extract_payloads' -Arguments $extractionArguments
     Invoke-AnalysisStage -Module 'analysis.classify_payloads' -Arguments @(
-        $RunDirectory, $DerivedDirectory
+        $RunDirectory, $analysisDirectory
     )
     Invoke-AnalysisStage -Module 'analysis.validate_git_artifacts' -Arguments @(
-        $RunDirectory, $DerivedDirectory, $ExpectedCanaryRepository
+        $RunDirectory, $analysisDirectory, $ExpectedCanaryRepository
     )
     Invoke-AnalysisStage -Module 'analysis.generate_report' -Arguments @(
-        $RunDirectory, $DerivedDirectory, '--capture-status', 'NOT_EVALUATED'
+        $RunDirectory,
+        $analysisDirectory,
+        '--control-directory', $controlDirectory,
+        '--report-directory', $reportDirectory,
+        '--capture-status', $CaptureStatus
     )
 }
 finally {
     [Environment]::SetEnvironmentVariable('PYTHONPATH', $previousPythonPath, 'Process')
 }
 
-Write-Host "Analysis complete. Derived evidence: $DerivedDirectory"
+Write-Host "Analysis complete. Output root: $OutputRoot"

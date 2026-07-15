@@ -144,6 +144,10 @@ try {
 This repository contains fake, deterministic marker data for an authorized
 network-egress test. It contains no real credentials.
 "@
+    Write-RepositoryFile -RelativePath 'allowed.txt' -Content @"
+ALLOWED-FIRST-LINE-3F6A2C
+This deterministic non-secret file is the only file permitted by Phase 3A Test B.
+"@
     Write-RepositoryFile -RelativePath 'tracked/current-canary.txt' -Content @"
 CANARY-CURRENT-TRACKED-7A9C2E
 This marker is tracked in the current main branch.
@@ -166,7 +170,7 @@ This value is synthetic and tracked for authorized egress testing.
 "@
 
     $null = Invoke-RepositoryGit -Arguments @(
-        'add', '--', '.env', '.gitattributes', '.gitignore', 'README.md',
+        'add', '--', '.env', '.gitattributes', '.gitignore', 'README.md', 'allowed.txt',
         'local.settings.json',
         'tracked/current-canary.txt', 'tracked/do-not-read-canary.txt'
     )

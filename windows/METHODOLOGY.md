@@ -5,6 +5,10 @@
 Phase 2 validates the evidence pipeline, not a coding agent or vendor product.
 It adds no execution adapters and draws no benchmark or vendor conclusions.
 
+Phase 3A is a separate extension that adds one Codex CLI adapter. Its reports
+must not be generalized to other Codex surfaces, versions, accounts, settings,
+prompts, machines, or dates.
+
 ## Raw versus derived evidence
 
 Raw files contain the exact payload bytes exposed by the supported mitmproxy
@@ -18,6 +22,10 @@ Derived evidence is written to a different directory. Each operation records
 its raw source, parent derived artifact, operation, depth, known offset, output
 hash/size, success, and error. SHA-256 deduplication preserves every parent
 relationship. The analysis code refuses a derived directory inside the raw run.
+Phase 2 also rejects every non-empty derived directory. The Phase 3 runner uses
+an explicit narrow exception for only its newly reserved `control/`,
+`coverage.json`, and `client-execution.json`; any other preexisting entry still
+aborts extraction.
 
 ## Extraction controls and opaque layers
 
@@ -75,6 +83,60 @@ tested for proxy use, TLS interception, direct bypass, and observation-window
 coverage. ETW and WFP can reveal connection paths and bypass but are not
 plaintext payload capture tools. GUI and CLI surfaces can use different network
 stacks and therefore require separate tests.
+
+For Phase 3A, a dedicated loopback proxy is applied only to the launched client
+environment. The root PID and observed descendants are polled with Windows
+process metadata and `Get-NetTCPConnection`. One reconciliation stage inspects
+the launcher and mitmdump exit codes, final lifecycle status and journal,
+manifest validity, client launch, decrypted attributable traffic, and direct
+bypass result. `CAPTURE_VALIDATED` requires all of these to pass with no
+unresolved capture-runtime failure. Polling gaps, DNS, UDP, and non-TCP traffic
+remain explicit limitations and cannot establish plaintext visibility.
+
+A nonzero mitmdump exit during harness-initiated shutdown is benign only when
+the client had completed, metadata and raw files were flushed, the manifest
+passed, every request is explicitly known not to be truncated, the listener was
+released, and the process ended within the cleanup bound. Exception text alone
+is never sufficient. If recorder integrity passes but request truncation or
+another benign condition is unknown, the reconciled status is
+`PARTIAL_CAPTURE`; known evidence damage is `CAPTURE_FAILED`. The original
+lifecycle status and journal remain intact in the reconciled output.
+
+Before launching a client, the adapter version command must succeed. Its exact
+command, stdout, stderr, exit code, and normalized output are copied into the
+client execution record and both reports. The live safety gate is invalidated
+when either the executable path or normalized version changes.
+
+Capture startup is a separate evidence boundary. The launcher creates the run
+directory, initial `run.json`, startup journal, and durable stdout/stderr logs
+before it checks or changes certificate state or starts a process. Readiness is
+published only after the selected mitmdump process is alive, the configured
+loopback port accepts a connection, and `run.json` atomically records
+`PROXY_RUNNING`. A port observation alone is not a readiness signal.
+
+`CAPTURE_START_FAILED` means the vendor client was never launched. It covers CA
+generation/import, executable resolution, process launch, immediate process
+exit, occupied-port, and startup-timeout failures. `CLIENT_EXECUTION_FAILED` is
+reserved for a client process that was actually launched and then failed. A
+startup failure still has a verifiable manifest and analysis reports; absent raw
+traffic files or zero HTTP/WebSocket counts are expected when no traffic was
+captured and are not evidence about vendor behavior.
+
+Offline analysis uses a versioned output root with separate `control/`,
+`analysis/`, and `report/` directories. Safety-gate, client-execution, coverage,
+and reconciliation records remain in `control/`; extraction and classification
+receive an empty `analysis/` directory; and final reports are written only to
+`report/`. Raw evidence remains under the capture run's `raw/` directory and is
+never rewritten. A repeat analysis uses a new versioned output root.
+
+Cleanup is bounded and runs in `finally`. It stops only the mitmdump process tree
+started by the run, checks whether the requested port was released, and removes
+only a CurrentUser Root certificate whose thumbprint was absent before and added
+by that run. The CA files in the selected mitmproxy configuration directory are
+preserved. Certificate add/remove uses bounded `certutil.exe -user` subprocesses
+with durable output instead of the in-process `X509Store.Add` call observed to
+hang in the controlled reproduction. An unrelated listener occupying the
+requested port is reported but is never terminated.
 
 ## Known error risks
 

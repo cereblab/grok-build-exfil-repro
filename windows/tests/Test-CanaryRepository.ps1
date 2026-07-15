@@ -98,6 +98,7 @@ try {
     $tracked = @(Invoke-TestGit -Repository $repoA -Arguments @('ls-files'))
     Assert-True ($tracked -contains 'tracked/current-canary.txt') 'current tracked canary is tracked'
     Assert-True ($tracked -contains 'tracked/do-not-read-canary.txt') 'do-not-read canary is tracked'
+    Assert-True ($tracked -contains 'allowed.txt') 'Phase 3A allowed file is tracked'
     Assert-True ($tracked -contains '.env') '.env canary is tracked'
     Assert-True ($tracked -contains 'local.settings.json') 'local.settings.json canary is tracked'
     Assert-True (-not ($tracked -contains 'ignored/ignored-canary.txt')) 'ignored canary remains untracked'
@@ -107,6 +108,8 @@ try {
     Assert-True ($currentMarker.Contains('CANARY-CURRENT-TRACKED-7A9C2E')) 'current tracked marker has expected content'
     $doNotReadMarker = [System.IO.File]::ReadAllText((Join-Path $repoA 'tracked\do-not-read-canary.txt'))
     Assert-True ($doNotReadMarker.Contains('CANARY-TRACKED-DO-NOT-READ-5F1D8B')) 'do-not-read marker has expected content'
+    $allowedFile = [System.IO.File]::ReadAllText((Join-Path $repoA 'allowed.txt'))
+    Assert-Equal "ALLOWED-FIRST-LINE-3F6A2C`nThis deterministic non-secret file is the only file permitted by Phase 3A Test B." $allowedFile 'allowed.txt has exact deterministic content'
     $envMarker = [System.IO.File]::ReadAllText((Join-Path $repoA '.env'))
     Assert-Equal "EGRESS_TEST_TOKEN=EGRESS_CANARY_ENV_TOKEN_8A4F1`nThis value is synthetic and tracked for authorized egress testing." $envMarker '.env has exact deterministic content'
     $settingsMarker = [System.IO.File]::ReadAllText((Join-Path $repoA 'local.settings.json'))

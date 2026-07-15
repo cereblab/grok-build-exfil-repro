@@ -43,6 +43,7 @@ from analysis.models import (
     sha256_bytes,
     write_json_atomic,
 )
+from analysis.output_layout import prepare_output_layout
 
 
 def _create_run(root: Path, payloads: list[dict[str, object]]) -> Path:
@@ -165,6 +166,44 @@ def _create_git_repository(root: Path) -> Path:
 
 
 class ExtractionTests(unittest.TestCase):
+    def test_run_output_layout_isolated_and_requires_versioned_rerun(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="phase3-output-layout-") as temporary:
+            root = Path(temporary) / "run-v1"
+            layout = prepare_output_layout(root)
+            (layout.control / "safety-gate.json").write_text("{}\n", encoding="utf-8")
+            (layout.control / "coverage.json").write_text("{}\n", encoding="utf-8")
+            self.assertEqual([], list(layout.analysis.iterdir()))
+            self.assertEqual([], list(layout.report.iterdir()))
+            self.assertEqual(
+                {"control", "analysis", "report"},
+                {item.name for item in root.iterdir()},
+            )
+            (layout.analysis / "extraction-result.json").write_text("{}\n", encoding="utf-8")
+            with self.assertRaises(FileExistsError):
+                prepare_output_layout(root)
+            versioned = prepare_output_layout(Path(temporary) / "run-v2")
+            self.assertEqual([], list(versioned.analysis.iterdir()))
+
+    def test_phase3_control_file_allowlist_is_narrow(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="phase3-derived-allowlist-") as temporary:
+            root = Path(temporary)
+            run = _create_run(root, [])
+            derived = root / "derived"
+            (derived / "control").mkdir(parents=True)
+            (derived / "control" / "safety-gate.json").write_text(
+                "{}\n", encoding="utf-8"
+            )
+            write_json_atomic(derived / "coverage.json", {})
+            write_json_atomic(derived / "client-execution.json", {})
+            result = extract_run(run, derived, allow_agent_control_files=True)
+            self.assertEqual(EXTRACTION_SCHEMA, result["schema_version"])
+
+            unexpected = root / "unexpected-derived"
+            unexpected.mkdir()
+            (unexpected / "unapproved.txt").write_text("x", encoding="utf-8")
+            with self.assertRaises(FileExistsError):
+                extract_run(run, unexpected, allow_agent_control_files=True)
+
     def test_http_gzip_zlib_raw_deflate_brotli_and_chain(self) -> None:
         original = b"decoded-content-" + CANARIES["env_canary"]
         compressor = zlib.compressobj(wbits=-zlib.MAX_WBITS)

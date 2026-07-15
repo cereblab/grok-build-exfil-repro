@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import asyncio
 import json
 import os
 import platform
@@ -17,6 +18,7 @@ from wsproto.frame_protocol import Opcode
 
 
 CAPTURE_DIRECTORY_ENV = "EGRESS_CAPTURE_DIR"
+CAPTURE_STOP_FILE_ENV = "EGRESS_CAPTURE_STOP_FILE"
 MANIFEST_SCHEMA = "egress-evidence-manifest/v1"
 METADATA_SCHEMA = "egress-capture-metadata/v1"
 
@@ -192,6 +194,7 @@ class RequestEvidenceRecorder:
         if self._http_directory is None or self._request_metadata_path is None:
             raise RuntimeError("The evidence recorder was not initialized.")
 
+        raw_content_available = flow.request.raw_content is not None
         raw_body = flow.request.raw_content
         if raw_body is None:
             raw_body = b""
@@ -203,6 +206,19 @@ class RequestEvidenceRecorder:
             self._http_directory, self._request_sequence, raw_body
         )
         path, query_present = _safe_request_path(str(flow.request.path))
+        content_length_text = self._header(flow.request.headers, "content-length")
+        declared_content_length = None
+        if content_length_text is not None:
+            try:
+                declared_content_length = int(content_length_text)
+            except ValueError:
+                declared_content_length = None
+        transfer_encoding = self._header(flow.request.headers, "transfer-encoding")
+        body_truncated = None
+        if declared_content_length is not None and not transfer_encoding:
+            body_truncated = len(raw_body) != declared_content_length
+        elif len(raw_body) == 0 and declared_content_length in (None, 0):
+            body_truncated = False
         record = {
             "schema_version": METADATA_SCHEMA,
             "timestamp": self._request_timestamp(flow),
@@ -216,7 +232,10 @@ class RequestEvidenceRecorder:
             "http_version": getattr(flow.request, "http_version", None),
             "content_type": self._header(flow.request.headers, "content-type"),
             "content_encoding": self._header(flow.request.headers, "content-encoding"),
-            "transfer_encoding": self._header(flow.request.headers, "transfer-encoding"),
+            "transfer_encoding": transfer_encoding,
+            "declared_content_length": declared_content_length,
+            "raw_content_available": raw_content_available,
+            "body_truncated": body_truncated,
             "body_size": len(raw_body),
             "body_sha256": body_sha256,
             "raw_body_file": f"raw/http/{body_name}",
@@ -284,6 +303,17 @@ class RequestEvidenceRecorder:
             ctx.log.error(
                 f"EVIDENCE MANIFEST FINALIZATION FAILED: {type(exc).__name__}: {exc}"
             )
+
+    async def running(self) -> None:
+        """Request a clean mitmproxy shutdown when the optional stop file appears."""
+
+        configured_stop_file = os.environ.get(CAPTURE_STOP_FILE_ENV)
+        if not configured_stop_file:
+            return
+        stop_file = Path(configured_stop_file).expanduser().resolve()
+        while not stop_file.exists():
+            await asyncio.sleep(0.2)
+        ctx.master.shutdown()
 
     def _write_manifest(self, *, capture_ended_cleanly: bool) -> None:
         required = (
