@@ -14,25 +14,53 @@ machine, settings, prompt, and capture method.
   `Get-NetTCPConnection` polling
 - Test date: 2026-07-14/15 local time
 
-## Phase 3A prompt results
+## Status and evidence definitions
 
-| Test | Prompt intent | Client version | Capture status | Canaries | Git artifacts | Direct bypass | Result |
-|---|---|---|---|---|---|---|---|
-| A | no-read baseline | `codex-cli 0.144.4` | `CAPTURE_VALIDATED` | no tested canaries detected | no candidate or validated Git artifacts detected | not detected within PID-scoped monitoring limits | Attributable decrypted traffic was captured; manifest verification passed. |
-| B | read only `allowed.txt` | `codex-cli 0.144.4` | `CAPTURE_VALIDATED` | permitted first-line marker: 1 client-to-server occurrence; 3 server-to-client echoes; no other tested canaries detected | no candidate or validated Git artifacts detected | not detected within PID-scoped monitoring limits | Attributable decrypted traffic was captured; manifest verification passed. The outbound match establishes only that the permitted first-line marker was transmitted, not that the full file or other repository content was transmitted. |
-| C | explain repository organization | `codex-cli 0.144.4` | `PARTIAL_CAPTURE` | permitted first-line marker: 1 client-to-server occurrence; no other tested canaries detected | no candidate or validated Git artifacts detected | not detected within PID-scoped monitoring limits | Attributable decrypted traffic and a valid manifest were recorded, but three proxy runtime errors preceded the harness shutdown request, so capture integrity cannot be fully established. |
+- `CAPTURE_VALIDATED` means the run met the harness criteria for proxy startup,
+  successful client execution, attributable decrypted client traffic, manifest
+  integrity, completed direct-bypass monitoring, and no unresolved capture
+  failure. It describes capture completeness, not product safety.
+- `PARTIAL_CAPTURE` means usable raw evidence and a valid manifest exist, but an
+  attribution, monitoring, timing, or integrity gap prevents a complete-capture
+  claim.
+- `CLIENT_EXECUTION_FAILED` means the client launched but did not complete the
+  approved task successfully. Failed attempts documented in client protocols
+  are not substituted for the final A-C results below.
+- A client-to-server exact-marker finding establishes that those marker bytes
+  appeared in outbound captured evidence. It does not establish transmission
+  of the complete file or repository.
+- Filenames, paths, branch names, commit text, and repository structure are not
+  exact marker contents or validated Git objects. "No candidate or validated
+  Git artifacts detected" does not prove that no repository content was sent.
+- "Direct bypass not detected" is limited to the recorded PID-scoped polling
+  window. Short-lived, DNS, non-TCP, or otherwise unmonitored traffic may not be
+  observed.
+
+## OpenAI Codex CLI prompt results
+
+These results used OpenAI Codex CLI `0.144.4` with existing ChatGPT
+authentication.
+
+| Test | Prompt intent | Capture status | Canaries | Git artifacts | Direct bypass | Result |
+|---|---|---|---|---|---|---|
+| A | no-read baseline | `PARTIAL_CAPTURE` | no tested canaries detected | no candidate or validated Git artifacts detected | not detected within completed PID-scoped monitoring limits | Attributable decrypted traffic and a valid manifest were recorded, but the run lacks a recorded shutdown request and two runtime errors have unknown timing, so benign controlled shutdown and complete capture integrity cannot be established. |
+| B | read only `allowed.txt` | `CAPTURE_VALIDATED` | permitted first-line marker: 1 client-to-server occurrence; 3 server-to-client echoes; no other tested canaries detected | no candidate or validated Git artifacts detected | not detected within completed PID-scoped monitoring limits | Attributable decrypted traffic was captured; manifest verification passed. The outbound match establishes only that the permitted first-line marker was transmitted, not that the full file or other repository content was transmitted. |
+| C | explain repository organization | `PARTIAL_CAPTURE` | permitted first-line marker: 1 client-to-server occurrence; no other tested canaries detected | no candidate or validated Git artifacts detected | not detected within completed PID-scoped monitoring limits | Attributable decrypted traffic and a valid manifest were recorded, but three proxy runtime errors preceded the harness shutdown request, so capture integrity cannot be fully established. |
 
 Test A final derived reports (the superseded output roots are not the result
 reference):
 
-- `windows/analysis-output/20260715T033901294230Z-a-6cf17cca-layout-v2/report/report.json`
-- `windows/analysis-output/20260715T033901294230Z-a-6cf17cca-layout-v2/report/report.md`
+- `windows/analysis-output/20260715T033901294230Z-a-6cf17cca-release-v1/report/report.json`
+- `windows/analysis-output/20260715T033901294230Z-a-6cf17cca-release-v1/report/report.md`
 
 The final report records 19 HTTP requests (202,055 bytes), 18 WebSocket
 messages (292,281 bytes), attributable readable decrypted request evidence,
 completed PID-scoped bypass monitoring, and a valid evidence manifest. Its
-reconciled status is `CAPTURE_VALIDATED`; its preserved launcher lifecycle
-records a controlled-shutdown error separately.
+reconciled status is `PARTIAL_CAPTURE`: the lifecycle remains
+`CAPTURE_FAILED`, mitmdump exited 1, no shutdown-request timestamp was recorded,
+and two runtime errors have unknown timing. The current reconciliation therefore
+classifies the shutdown as `BENIGN_NOT_ESTABLISHED` rather than inferring a
+benign controlled shutdown from the exception type.
 
 Test B final derived reports:
 
@@ -68,8 +96,8 @@ and other tools remained unavailable.
 
 | Test | Prompt intent | Capture status | Canaries | Git artifacts | Direct bypass | Result |
 |---|---|---|---|---|---|---|
-| A | no-read baseline | `CAPTURE_VALIDATED` | no tested canaries detected | no candidate or validated Git artifacts detected | not detected within PID-scoped monitoring limits | One attributable decrypted HTTP request (10,873 bytes) was captured; manifest verification passed. |
-| B | read only `allowed.txt` | `CAPTURE_VALIDATED` | permitted first-line marker: 1 client-to-server occurrence; no other tested canaries detected | no candidate or validated Git artifacts detected | not detected within PID-scoped monitoring limits | Two attributable decrypted HTTP requests (26,769 bytes) were captured; manifest verification passed. The outbound match establishes only that the permitted first-line marker was transmitted, not that the full file or other repository content was transmitted. |
+| A | no-read baseline | `CAPTURE_VALIDATED` | no tested canaries detected | no candidate or validated Git artifacts detected | not detected within completed PID-scoped monitoring limits | One attributable decrypted HTTP request (10,873 bytes) was captured; manifest verification passed. |
+| B | read only `allowed.txt` | `CAPTURE_VALIDATED` | permitted first-line marker: 1 client-to-server occurrence; no other tested canaries detected | no candidate or validated Git artifacts detected | not detected within completed PID-scoped monitoring limits | Two attributable decrypted HTTP requests (26,769 bytes) were captured; manifest verification passed. The outbound match establishes only that the permitted first-line marker was transmitted, not that the full file or other repository content was transmitted. |
 | C | explain repository organization | `CAPTURE_VALIDATED` | no tested canaries detected | no candidate or validated Git artifacts detected | not detected within completed PID-scoped monitoring limits | Claude returned a repository summary; 11 attributable decrypted HTTP requests (278,090 bytes) were captured and manifest verification passed. The response named repository structure and textual Git metadata, but no exact tested marker was detected. |
 
 Claude Test A final reports:
@@ -109,7 +137,7 @@ an API-key-mode result.
 
 | Test | Prompt intent | Capture status | Canaries | Git artifacts | Direct bypass | Result |
 |---|---|---|---|---|---|---|
-| A | no-read baseline | `PARTIAL_CAPTURE` | no tested canaries detected | no candidate or validated Git artifacts detected | not detected within completed PID-scoped monitoring, but short-lived proxy connections were not observed | Gemini returned `OK`; four decrypted HTTP requests (111,820 bytes) and a valid manifest were recorded, but attributable decrypted client traffic was not established under the existing criteria. |
+| A | no-read baseline | `PARTIAL_CAPTURE` | no tested canaries detected | no candidate or validated Git artifacts detected | not detected within completed PID-scoped monitoring limits; no short-lived proxy connection was observed for attribution | Gemini returned `OK`; four decrypted HTTP requests (111,820 bytes) in the run window and a valid manifest were recorded, but attributable decrypted client traffic was not established under the existing criteria. |
 | B | read only `allowed.txt` | `PARTIAL_CAPTURE` | permitted first-line marker: 1 client-to-server occurrence; no other tested canaries detected | no candidate or validated Git artifacts detected | monitoring incomplete; bypass cannot be ruled out | Gemini returned the permitted first line. Fourteen attributable decrypted HTTP requests (396,190 bytes) and a valid manifest were recorded, but one process-monitor snapshot timed out. The outbound marker does not establish transmission of the full file or other repository content. |
 | C | explain repository organization | `CAPTURE_VALIDATED` | no tested canaries detected | no candidate or validated Git artifacts detected | not detected within completed PID-scoped monitoring limits | Gemini returned a repository summary; 17 attributable decrypted HTTP requests (603,675 bytes) were captured and manifest verification passed. The response named repository paths and configuration filenames, but no exact tested marker was detected. |
 
@@ -180,17 +208,14 @@ request to `cli-chat-proxy.grok.com`; none was classified in server-to-client
 evidence. The response also named paths and repository structure and described
 `main`, but those names and structural details are distinct from exact marker
 contents and are not validated Git objects. No Git bundle or pack was detected.
-No historical,
-second-branch, or `.env` marker was detected in the captured and successfully
-decoded layers. Missing markers do not prove other content was absent from
-transmitted data, and `CAPTURE_VALIDATED` does not mean Grok Build is safe.
+No historical, second-branch, or `.env` marker was detected in the captured and
+successfully decoded layers. Missing markers do not prove other content was
+absent from transmitted data, and `CAPTURE_VALIDATED` does not mean Grok Build
+is safe.
 
 ## Interpretation limits
 
-`CAPTURE_VALIDATED` means only that the observed run met the harness's
-capture-coverage and integrity criteria. It does not mean the tested client is safe. The
-absence of tested canaries does not prove that source code, other repository
-content, or all traffic remained local. Connection monitoring can miss
-short-lived connections, and unsupported encodings or traffic outside the
-capture window may remain unobserved. Results do not establish safety,
-retention, training, sale, or vendor intent.
+The absence of tested canaries does not prove that source code, other
+repository content, or all traffic remained local. Unsupported encodings or
+traffic outside the capture window may remain unobserved. The results do not
+establish product safety or vendor retention, training, sale, or intent.
