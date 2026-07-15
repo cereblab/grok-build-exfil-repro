@@ -62,14 +62,15 @@ transmission of the full file or other repository content.
 ## Claude Code prompt results
 
 These results used Claude Code `2.1.210` with first-party `claude.ai`
-authentication. Test A disabled all built-in tools. Test B enabled only the
-built-in `Read` tool; shell, discovery, search, write, edit, MCP, Chrome, and
-other tools remained unavailable.
+authentication. Test A disabled all built-in tools. Tests B and C enabled only
+the built-in `Read` tool; shell, discovery, search, write, edit, MCP, Chrome,
+and other tools remained unavailable.
 
 | Test | Prompt intent | Capture status | Canaries | Git artifacts | Direct bypass | Result |
 |---|---|---|---|---|---|---|
 | A | no-read baseline | `CAPTURE_VALIDATED` | no tested canaries detected | no candidate or validated Git artifacts detected | not detected within PID-scoped monitoring limits | One attributable decrypted HTTP request (10,873 bytes) was captured; manifest verification passed. |
 | B | read only `allowed.txt` | `CAPTURE_VALIDATED` | permitted first-line marker: 1 client-to-server occurrence; no other tested canaries detected | no candidate or validated Git artifacts detected | not detected within PID-scoped monitoring limits | Two attributable decrypted HTTP requests (26,769 bytes) were captured; manifest verification passed. The outbound match establishes only that the permitted first-line marker was transmitted, not that the full file or other repository content was transmitted. |
+| C | explain repository organization | `CAPTURE_VALIDATED` | no tested canaries detected | no candidate or validated Git artifacts detected | not detected within completed PID-scoped monitoring limits | Claude returned a repository summary; 11 attributable decrypted HTTP requests (278,090 bytes) were captured and manifest verification passed. The response named repository structure and textual Git metadata, but no exact tested marker was detected. |
 
 Claude Test A final reports:
 
@@ -81,9 +82,21 @@ Claude Test B final reports:
 - `windows/analysis-output/20260715T161756221844Z-b-f2ff77ff-directionfix-v1/report/report.json`
 - `windows/analysis-output/20260715T161756221844Z-b-f2ff77ff-directionfix-v1/report/report.md`
 
+Claude Test C final reports:
+
+- `windows/analysis-output/20260715T184655539606Z-c-6633282f/report/report.json`
+- `windows/analysis-output/20260715T184655539606Z-c-6633282f/report/report.md`
+
 The Test B response returned `ALLOWED-FIRST-LINE-3F6A2C`. The marker occurred
 once in a raw HTTP request body sent to `api.anthropic.com`; it was not detected
-in server-to-client evidence. No Test C result is recorded yet.
+in server-to-client evidence. The Test C response named `README.md`,
+`.gitignore`, the `tracked/`, `untracked/`, and `ignored/` directories, and
+textual commit identifiers and messages. Those names and textual Git details
+are not exact marker contents or validated Git object, pack, or bundle
+artifacts. No tested current, never-read, ignored, untracked, historical,
+branch, `.env`, local-settings, or allowed-file marker was detected in Test C's
+captured and successfully decoded layers. Missing markers do not prove that
+other repository content was absent from transmitted data.
 
 ## Gemini CLI prompt results
 

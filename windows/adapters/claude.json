@@ -36,7 +36,7 @@
     "claude.ai",
     "platform.claude.com"
   ],
-  "authentication_mode": "Not logged in as of 2026-07-15; interactive Claude.ai authentication requires separate approval",
+  "authentication_mode": "First-party claude.ai authentication using the persisted user session; credentials were not inspected or exported",
   "authentication_failure_patterns": [
     "(?i)not\\s+logged\\s+in",
     "(?i)(?:/login|claude\\s+auth\\s+login)"
@@ -47,13 +47,13 @@
   "notes": [
     "Anthropic's official native installer installed Claude Code 2.1.210 at the explicit user-scope executable path.",
     "Local help verified --safe-mode, --strict-mcp-config, --tools, --permission-mode plan, --no-session-persistence, --output-format json, --add-dir, and -p.",
-    "The validated Test A gate disabled all built-in tools. The current Test B gate enables only Read so allowed.txt can be opened without enabling discovery, shell, or write tools.",
-    "Anthropic documents HTTP_PROXY, HTTPS_PROXY, NO_PROXY, and NODE_EXTRA_CA_CERTS; interception and CA trust remain subject to empirical validation."
+    "The validated Test A gate disabled all built-in tools. Tests B and C enable only Read without enabling discovery, shell, or write tools.",
+    "Anthropic documents HTTP_PROXY, HTTPS_PROXY, NO_PROXY, and NODE_EXTRA_CA_CERTS; interception and CA trust were validated for the recorded Test A, Test B, and Test C runs and remain run-specific."
   ],
   "limitations": [
-    "Authentication status reported loggedIn=false with authMethod=none and exit code 1; no login flow was launched.",
+    "Successful authenticated Test A, Test B, and Test C executions established the persisted first-party session without inspecting account details or credential material.",
     "Claude Code documentation states that sandboxing is not supported on native Windows, so no OS sandbox guarantee is claimed.",
-    "Proxy routing, certificate trust, expected hosts, and direct-bypass behavior remain unverified until an approved live gate.",
-    "No model prompt has been sent by this harness."
+    "Proxy routing, certificate trust, expected hosts, and direct-bypass behavior must be validated independently for each approved live run.",
+    "The recorded Test A, Test B, and Test C results apply only to their preserved commands, prompts, environments, and evidence."
   ]
 }
