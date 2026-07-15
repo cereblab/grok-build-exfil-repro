@@ -1,0 +1,6 @@
+.venv/
+captures/
+analysis-output/
+canary-repository/
+__pycache__/
+*.pyc
