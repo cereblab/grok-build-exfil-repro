@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/egress-report-v1.schema.json",
+  "title": "Windows egress evidence report",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "capture_status",
+    "run_metadata",
+    "evidence_integrity",
+    "raw_files_processed",
+    "derived_artifacts_created",
+    "decoding_operations",
+    "decoding_failures",
+    "canary_findings",
+    "git_candidate_findings",
+    "git_validation_results",
+    "limitations",
+    "untested_assumptions"
+  ],
+  "properties": {
+    "schema_version": {"const": "egress-report/v1"},
+    "capture_status": {
+      "enum": [
+        "CAPTURE_VALIDATED",
+        "PARTIAL_CAPTURE",
+        "TLS_INTERCEPTION_FAILED",
+        "DIRECT_BYPASS_DETECTED",
+        "NO_AGENT_TRAFFIC_OBSERVED",
+        "NOT_EVALUATED"
+      ]
+    },
+    "run_metadata": {"type": "object"},
+    "evidence_integrity": {"type": "object"},
+    "raw_files_processed": {"type": "array"},
+    "derived_artifacts_created": {"type": "array"},
+    "decoding_operations": {"type": "array"},
+    "decoding_failures": {"type": "array"},
+    "unsupported_encodings": {"type": "array"},
+    "processing_limits_reached": {"type": "array"},
+    "canary_findings": {"type": "array"},
+    "canary_summary": {"type": "string"},
+    "git_candidate_findings": {"type": "array"},
+    "git_validation_results": {"type": "object"},
+    "limitations": {"type": "array", "items": {"type": "string"}},
+    "untested_assumptions": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}
