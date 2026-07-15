@@ -44,6 +44,7 @@ from analysis.reconcile_capture_outcome import (
 ADAPTER_PATH = WINDOWS_ROOT / "adapters" / "codex.json"
 GEMINI_ADAPTER_PATH = WINDOWS_ROOT / "adapters" / "gemini.json"
 CLAUDE_ADAPTER_PATH = WINDOWS_ROOT / "adapters" / "claude.json"
+GROK_ADAPTER_PATH = WINDOWS_ROOT / "adapters" / "grok.json"
 SCHEMA_PATH = WINDOWS_ROOT / "adapters" / "schema" / "adapter.schema.json"
 
 
@@ -291,6 +292,68 @@ class AdapterValidationTests(unittest.TestCase):
         self.assertNotIn("Grep", " ".join(template))
         self.assertTrue(adapter["authentication_failure_patterns"])
         self.assertNotIn("ANTHROPIC_API_KEY", adapter["environment_variables"])
+
+    def test_installed_grok_adapter_limits_test_c_to_read_only_tools(self) -> None:
+        adapter = load_adapter(GROK_ADAPTER_PATH, SCHEMA_PATH)
+        template = adapter["noninteractive_command_template"]
+        environment = adapter["environment_variables"]
+        self.assertEqual("Grok Build", adapter["product_name"])
+        self.assertEqual("xAI", adapter["vendor"])
+        self.assertEqual("grok.exe", Path(adapter["executable"]).name)
+        self.assertIn("--single", template)
+        self.assertIn("--cwd", template)
+        self.assertIn("--tools=read_file,list_dir", template)
+        self.assertIn("--disable-web-search", template)
+        self.assertIn("--no-memory", template)
+        self.assertIn("--no-subagents", template)
+        self.assertIn("--no-auto-update", template)
+        self.assertIn("--verbatim", template)
+        self.assertEqual("Agent", template[template.index("--disallowed-tools") + 1])
+        denied = {
+            template[index + 1]
+            for index, value in enumerate(template)
+            if value == "--deny"
+        }
+        self.assertEqual(
+            {"Bash", "Edit", "Write", "Grep", "WebFetch", "WebSearch", "MCPTool"},
+            denied,
+        )
+        self.assertEqual("default", template[template.index("--permission-mode") + 1])
+        self.assertEqual("3", template[template.index("--max-turns") + 1])
+        self.assertEqual("json", template[template.index("--output-format") + 1])
+        self.assertNotIn("--always-approve", template)
+        self.assertNotIn("--continue", template)
+        self.assertNotIn("--resume", template)
+        self.assertNotIn("--worktree", template)
+        self.assertEqual("0", environment["GROK_MEMORY"])
+        self.assertEqual("0", environment["GROK_SUBAGENTS"])
+        self.assertEqual("0", environment["GROK_WEB_FETCH"])
+        self.assertEqual("1", environment["GROK_DISABLE_AUTOUPDATER"])
+        self.assertEqual(
+            ["cli-chat-proxy.grok.com"], adapter["expected_vendor_hosts"]
+        )
+        self.assertTrue(adapter["authentication_failure_patterns"])
+
+    def test_grok_adapter_prepares_generic_single_turn_command(self) -> None:
+        adapter = load_adapter(GROK_ADAPTER_PATH, SCHEMA_PATH)
+        with tempfile.TemporaryDirectory(prefix="grok-adapter-") as temporary:
+            root = Path(temporary)
+            prepared = prepare_invocation(
+                adapter,
+                working_directory=root,
+                prompt="Reply only with OK.",
+                proxy_port=8080,
+                ca_certificate=root / "mitmproxy-ca-cert.pem",
+            )
+        self.assertEqual(str(root.resolve()), prepared["working_directory"])
+        self.assertIn(str(root.resolve()), prepared["arguments"])
+        self.assertIn("Reply only with OK.", prepared["arguments"])
+        self.assertEqual(
+            "http://127.0.0.1:8080",
+            prepared["environment_variables"]["HTTPS_PROXY"],
+        )
+        self.assertEqual("0", prepared["environment_variables"]["GROK_MEMORY"])
+        self.assertEqual([], prepared["inherited_secret_environment_variables"])
 
 
 class ClientRuntimeTests(unittest.TestCase):

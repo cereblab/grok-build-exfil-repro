@@ -7,8 +7,9 @@ An earlier Test A established that no authentication method was configured and
 remains preserved. A separate Gemini CLI 0.50.0 API-key-mode gate can now pass a
 user-scoped key without serializing it; proxy, CA, and authenticated behavior
 remain unverified until an approved live run.
-`claude.json` remains an offline preparation template. No
-Grok Build or Antigravity adapter is included.
+`claude.json` remains an offline preparation template.
+`grok.json` records the installed Grok Build 0.2.101 command surface.
+No Antigravity adapter is included.
 
 The schema is `schema/adapter.schema.json` and the current schema version is
 `egress-adapter/v1`. Validate the checked-in adapter without launching a client:
@@ -95,7 +96,7 @@ environment, and prompt may a human run the exact printed `approval_command`.
 That command binds `-ApproveLiveTraffic` to the saved run ID; changed gate data
 is rejected.
 
-## Gemini and Claude adapters
+## Gemini, Claude, and Grok adapters
 
 Gemini CLI and Claude Code are installed at user scope using their vendors'
 official distribution methods. Claude Code uses Anthropic's native Windows
@@ -104,3 +105,14 @@ are verified, while `claude auth status` confirms it is not logged in. Its Test
 A command disables all built-in tools and customizations. Authentication,
 routing, certificate trust, and live behavior still require separate approval
 and empirical validation.
+
+Grok Build uses the explicit user-scoped executable at
+`C:\Users\jande\.grok\bin\grok.exe`. Its validated Test A used single-turn JSON
+output, an empty built-in-tool allowlist, and a catch-all tool-deny rule. The
+current Test C template enables only `read_file` and `list_dir`, explicitly
+denies shell, edit, write, search, web, MCP, and Agent classes, and retains
+independent web, memory, and subagent controls. The installed xAI
+sandbox documentation does not claim Windows enforcement. The corrected
+approved Test A returned `OK` and reconciled to `CAPTURE_VALIDATED`; proxy
+routing, CA trust, contacted hosts, and direct-bypass conclusions remain
+specific to that preserved run.

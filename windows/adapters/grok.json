@@ -1,0 +1,78 @@
+{
+  "schema_version": "egress-adapter/v1",
+  "product_name": "Grok Build",
+  "vendor": "xAI",
+  "client_surface": "CLI",
+  "executable": "C:\\Users\\jande\\.grok\\bin\\grok.exe",
+  "version_command": ["--version"],
+  "noninteractive_command_template": [
+    "--cwd", "{working_directory}",
+    "--disable-web-search",
+    "--no-memory",
+    "--no-subagents",
+    "--tools=read_file,list_dir",
+    "--disallowed-tools", "Agent",
+    "--deny", "Bash",
+    "--deny", "Edit",
+    "--deny", "Write",
+    "--deny", "Grep",
+    "--deny", "WebFetch",
+    "--deny", "WebSearch",
+    "--deny", "MCPTool",
+    "--permission-mode", "default",
+    "--max-turns", "3",
+    "--output-format", "json",
+    "--no-auto-update",
+    "--verbatim",
+    "--single", "{prompt}"
+  ],
+  "environment_variables": {
+    "HTTP_PROXY": "http://127.0.0.1:{proxy_port}",
+    "HTTPS_PROXY": "http://127.0.0.1:{proxy_port}",
+    "ALL_PROXY": "http://127.0.0.1:{proxy_port}",
+    "NO_PROXY": "127.0.0.1,localhost",
+    "SSL_CERT_FILE": "{ca_certificate}",
+    "GROK_MEMORY": "0",
+    "GROK_SUBAGENTS": "0",
+    "GROK_WEB_FETCH": "0",
+    "GROK_DISABLE_AUTOUPDATER": "1",
+    "GROK_TELEMETRY_ENABLED": "0",
+    "GROK_FEEDBACK_ENABLED": "0"
+  },
+  "timeout_seconds": 300,
+  "expected_vendor_hosts": [
+    "cli-chat-proxy.grok.com"
+  ],
+  "authentication_mode": "existing persisted xAI browser authentication; credential-file presence was verified without reading credential contents",
+  "authentication_failure_patterns": [
+    "(?i)authentication\\s+failed",
+    "(?i)not\\s+authenticated",
+    "(?i)please\\s+(?:sign|log)\\s+in",
+    "(?i)run\\s+grok\\s+login"
+  ],
+  "model_identifier": null,
+  "approval_mode": "default permission mode with only read_file and list_dir enabled; shell, edit, write, search, web, MCP, and Agent classes are explicitly denied",
+  "sandbox_mode": "Grok Build has no documented Windows OS sandbox; Test C exposes only read_file and list_dir and does not permit file modification",
+  "notes": [
+    "Grok Build 0.2.101 was installed by the official xAI Windows installer at the explicit user-scoped executable path.",
+    "Local --version reported grok 0.2.101 (5bc4b5dfad). Local --help and the bundled xAI headless guide verified --single, --cwd, --disable-web-search, --no-memory, --no-subagents, --tools, --disallowed-tools, --deny, --permission-mode, --max-turns, --output-format, --no-auto-update, and --verbatim.",
+    "The current Test C template enables only read_file and list_dir; shell, edit, write, search, web, MCP, and Agent classes are explicitly denied, and subagents are disabled by both flag and environment setting.",
+    "Web search is disabled by flag, web fetch is disabled by environment setting, and cross-session memory is disabled by both flag and environment setting.",
+    "The generic runner uses the persisted user authentication without reading or copying auth.json.",
+    "The first approved Test A attempt established authentication and attributable proxy capture but --max-turns 1 stopped after the reasoning turn before final text; two is the smallest evidence-supported ceiling that can permit the final answer.",
+    "Corrected run 20260715T200525528106Z-a-c2be8993 returned OK with exit code 0 and reconciled to CAPTURE_VALIDATED with a valid manifest, complete monitoring, no direct bypass detected, and no tested canary or Git artifact detected.",
+    "Test B run 20260715T203244965529Z-b-e1a10968 returned the permitted first line and reconciled to CAPTURE_VALIDATED; the run-specific allowed marker occurred once client-to-server over HTTP and no other tested marker or Git artifact was detected.",
+    "The first Test C attempt, run 20260715T224515006132Z-c-4d74d5f0, is preserved as CLIENT_EXECUTION_FAILED: two turns allowed listing and follow-up read requests but no final response. Three is the smallest evidence-supported ceiling that can permit the pending read results to be processed into a response.",
+    "Corrected Test C run 20260715T225153120488Z-c-85be9c9a returned a repository summary and reconciled to CAPTURE_VALIDATED; six exact tested markers occurred client-to-server, no Git artifact was validated, and no direct bypass was detected within completed monitoring."
+  ],
+  "limitations": [
+    "The installed xAI sandbox guide documents Linux and macOS mechanisms but no Windows enforcement, so no OS sandbox guarantee is claimed.",
+    "Grok writes ordinary session records under ~/.grok and local help exposes no no-session-persistence flag; the approved prompt is therefore expected to be stored in the client's own session data.",
+    "HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, SSL_CERT_FILE, and certificate trust produced attributable decrypted traffic in both approved Test A attempts, but routing and direct-bypass conclusions remain run-specific.",
+    "cli-chat-proxy.grok.com is an empirically observed host from the preserved failed first attempt and is a reporting hint, not independent attribution evidence.",
+    "Run 20260715T193714004929Z-a-e7f90afd is preserved as CLIENT_EXECUTION_FAILED because its one-turn ceiling produced no final response; it is not a valid no-read baseline result.",
+    "Run 20260715T224515006132Z-c-4d74d5f0 is preserved as CLIENT_EXECUTION_FAILED because its two-turn ceiling ended after additional read-only tool requests and before a final repository summary; it is not a valid Test C result.",
+    "Windows provides no Grok OS sandbox or CLI path-level read allowlist; Test B's allowed.txt-only restriction was prompt-enforced, and Test C's read_file and list_dir access is not an OS-enforced read boundary. Captured evidence must determine what was transmitted.",
+    "No credential, token, account identifier, or auth-file content is stored in this adapter."
+  ]
+}
