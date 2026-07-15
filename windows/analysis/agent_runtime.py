@@ -43,6 +43,7 @@ CREDENTIAL_ENVIRONMENT_VARIABLES = {
     "OPENAI_API_KEY",
     "OPENAI_ORGANIZATION",
     "OPENAI_PROJECT",
+    "GEMINI_API_KEY",
 }
 BASE_ENVIRONMENT_ALLOWLIST = {
     "APPDATA",
@@ -113,6 +114,39 @@ def validate_adapter_semantics(adapter: Mapping[str, Any]) -> None:
     }
     if prohibited:
         raise ValueError(f"Credential environment variables are prohibited: {sorted(prohibited)}")
+    inherited_secrets = {
+        name.upper()
+        for name in adapter.get("inherited_secret_environment_variables", [])
+    }
+    unsupported_secrets = inherited_secrets - CREDENTIAL_ENVIRONMENT_VARIABLES
+    if unsupported_secrets:
+        raise ValueError(
+            "Unsupported inherited secret environment variables: "
+            f"{sorted(unsupported_secrets)}"
+        )
+    duplicated_secrets = inherited_secrets & {
+        name.upper() for name in adapter.get("environment_variables", {})
+    }
+    if duplicated_secrets:
+        raise ValueError(
+            "Inherited secrets must not also be adapter environment variables: "
+            f"{sorted(duplicated_secrets)}"
+        )
+    for pattern in adapter.get("authentication_failure_patterns", []):
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise ValueError(
+                f"Invalid authentication failure pattern {pattern!r}: {exc}"
+            ) from exc
+    for classification in adapter.get("authentication_failure_classifications", []):
+        try:
+            re.compile(classification["pattern"])
+        except re.error as exc:
+            raise ValueError(
+                "Invalid authentication failure classification pattern "
+                f"{classification['pattern']!r}: {exc}"
+            ) from exc
 
 
 def substitute(value: str, replacements: Mapping[str, Any]) -> str:
@@ -139,6 +173,8 @@ def redact_text(value: str) -> str:
         (r"(?im)^(authorization|proxy-authorization|cookie|set-cookie)\s*[:=].*$", r"\1: [REDACTED]"),
         (r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]"),
         (r"\bsk-[A-Za-z0-9_-]{12,}\b", "[REDACTED_API_KEY]"),
+        (r"(?im)^(GEMINI_API_KEY\s*=\s*).*$", r"\1[REDACTED]"),
+        (r"\bAIza[A-Za-z0-9_-]{20,}\b", "[REDACTED_API_KEY]"),
         (r"(?i)(\"?(?:access|refresh|id|session)[_-]?token\"?\s*[:=]\s*\"?)[^\"\s,;]+", r"\1[REDACTED]"),
         (r"(?i)(\"?(?:session[_-]?id|organization[_-]?id|account[_-]?id)\"?\s*[:=]\s*\"?)[^\"\s,;]+", r"\1[REDACTED]"),
         (r"\b[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "[REDACTED_EMAIL]"),
@@ -149,8 +185,85 @@ def redact_text(value: str) -> str:
     return redacted
 
 
+def _read_secret_environment_variable(
+    name: str, base_environment: Mapping[str, str]
+) -> str | None:
+    for existing_name, value in base_environment.items():
+        if existing_name.upper() == name.upper() and str(value).strip():
+            return str(value)
+    if os.name != "nt":
+        return None
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            value, _ = winreg.QueryValueEx(key, name)
+        return str(value) if str(value).strip() else None
+    except (FileNotFoundError, OSError):
+        return None
+
+
+def verify_inherited_secret_availability(
+    adapter: Mapping[str, Any],
+    base_environment: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    names = list(adapter.get("inherited_secret_environment_variables", []))
+    source = os.environ if base_environment is None else base_environment
+    available_count = sum(
+        _read_secret_environment_variable(name, source) is not None for name in names
+    )
+    return {
+        "required_count": len(names),
+        "available_count": available_count,
+        "all_available": available_count == len(names),
+    }
+
+
+def verify_authentication_selection(adapter: Mapping[str, Any]) -> dict[str, Any]:
+    selection = adapter.get("authentication_selection")
+    if not selection:
+        return {
+            "configured": False,
+            "settings_file": None,
+            "selected_value": None,
+            "expected_value": None,
+            "matches": True,
+        }
+    settings_path = Path(str(selection["settings_file"])).expanduser().resolve()
+    result: dict[str, Any] = {
+        "configured": True,
+        "settings_file": str(settings_path),
+        "selected_value": None,
+        "expected_value": str(selection["expected_value"]),
+        "matches": False,
+    }
+    if not settings_path.is_file():
+        result["error"] = "Authentication selection settings file is missing."
+        return result
+    try:
+        current: Any = json.loads(settings_path.read_text(encoding="utf-8-sig"))
+        for component in selection["json_path"]:
+            if not isinstance(current, Mapping) or component not in current:
+                result["error"] = "Authentication selection field is missing."
+                return result
+            current = current[component]
+        if not isinstance(current, str):
+            result["error"] = "Authentication selection value is not a string."
+            return result
+        result["selected_value"] = current
+        result["matches"] = current == result["expected_value"]
+        if not result["matches"]:
+            result["error"] = "Selected authentication method does not match the adapter."
+        return result
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        result["error"] = f"Authentication selection could not be read: {type(exc).__name__}."
+        return result
+
+
 def build_child_environment(
-    base_environment: Mapping[str, str], adapter_environment: Mapping[str, str]
+    base_environment: Mapping[str, str],
+    adapter_environment: Mapping[str, str],
+    inherited_secret_names: list[str] | tuple[str, ...] = (),
 ) -> dict[str, str]:
     environment = {
         name: value
@@ -161,6 +274,13 @@ def build_child_environment(
         if existing.upper() in CONTROLLED_ENVIRONMENT_VARIABLES:
             environment.pop(existing, None)
     environment.update(adapter_environment)
+    for name in inherited_secret_names:
+        if name.upper() not in CREDENTIAL_ENVIRONMENT_VARIABLES:
+            raise ValueError("The adapter requested an unsupported inherited secret.")
+        value = _read_secret_environment_variable(name, base_environment)
+        if value is None:
+            raise ValueError("A required inherited secret is unavailable.")
+        environment[name] = value
     return environment
 
 
@@ -200,11 +320,20 @@ def prepare_invocation(
             subprocess.list2cmdline([executable_for_display, *arguments])
         ),
         "environment_variables": adapter_environment,
+        "inherited_secret_environment_variables": list(
+            adapter.get("inherited_secret_environment_variables", [])
+        ),
         "prompt": prompt,
         "working_directory": str(working_directory.resolve()),
         "timeout_seconds": int(adapter["timeout_seconds"]),
         "expected_vendor_hosts": list(adapter["expected_vendor_hosts"]),
         "authentication_mode": adapter["authentication_mode"],
+        "authentication_failure_patterns": list(
+            adapter.get("authentication_failure_patterns", [])
+        ),
+        "authentication_failure_classifications": list(
+            adapter.get("authentication_failure_classifications", [])
+        ),
         "model_identifier": adapter.get("model_identifier"),
         "approval_mode": adapter["approval_mode"],
         "sandbox_mode": adapter["sandbox_mode"],
@@ -459,9 +588,13 @@ def _monitor_target(
     )
 
 
-def _authentication_failed(stdout: str, stderr: str) -> bool:
+def detect_authentication_failure(
+    stdout: str,
+    stderr: str,
+    adapter_patterns: list[str] | tuple[str, ...] = (),
+) -> bool:
     text = f"{stdout}\n{stderr}".lower()
-    return any(
+    common_failure = any(
         marker in text
         for marker in (
             "authentication failed",
@@ -473,6 +606,55 @@ def _authentication_failed(stdout: str, stderr: str) -> bool:
             "http 401",
         )
     )
+    return common_failure or any(
+        re.search(pattern, f"{stdout}\n{stderr}") is not None
+        for pattern in adapter_patterns
+    )
+
+
+def classify_authentication_failure(
+    stdout: str,
+    stderr: str,
+    classifications: list[Mapping[str, str]] | tuple[Mapping[str, str], ...] = (),
+) -> dict[str, str | None]:
+    text = f"{stdout}\n{stderr}"
+    for classification in classifications:
+        if re.search(classification["pattern"], text) is not None:
+            return {
+                "reason": classification["reason"],
+                "observed_authentication_mode": classification[
+                    "observed_authentication_mode"
+                ],
+            }
+    return {"reason": None, "observed_authentication_mode": None}
+
+
+def reclassify_client_execution(
+    execution: Mapping[str, Any],
+    *,
+    stdout: str,
+    stderr: str,
+    authentication_failure_patterns: list[str] | tuple[str, ...] = (),
+    authentication_failure_classifications: (
+        list[Mapping[str, str]] | tuple[Mapping[str, str], ...]
+    ) = (),
+) -> dict[str, Any]:
+    corrected = dict(execution)
+    corrected["authentication_failed"] = detect_authentication_failure(
+        stdout,
+        stderr,
+        authentication_failure_patterns,
+    )
+    classification = classify_authentication_failure(
+        stdout,
+        stderr,
+        authentication_failure_classifications,
+    )
+    corrected["authentication_failure_reason"] = classification["reason"]
+    corrected["observed_authentication_mode"] = classification[
+        "observed_authentication_mode"
+    ]
+    return corrected
 
 
 def run_client(
@@ -497,6 +679,7 @@ def run_client(
         "product": prepared.get("product"),
         "vendor": prepared.get("vendor"),
         "client_surface": prepared.get("client_surface"),
+        "authentication_mode": prepared.get("authentication_mode"),
         "client_version": (
             version_verification.get("normalized_client_version")
             if version_verification and version_verification.get("verified")
@@ -535,14 +718,15 @@ def run_client(
         execution["error"] = f"Executable not found: {executable}"
     else:
         execution["executable_path"] = resolved
-        child_environment = build_child_environment(
-            os.environ if base_environment is None else base_environment,
-            prepared.get("environment_variables", {}),
-        )
         process: subprocess.Popen[str] | None = None
         stop_event = threading.Event()
         monitor_thread: threading.Thread | None = None
         try:
+            child_environment = build_child_environment(
+                os.environ if base_environment is None else base_environment,
+                prepared.get("environment_variables", {}),
+                list(prepared.get("inherited_secret_environment_variables", [])),
+            )
             process = subprocess.Popen(
                 [resolved, *prepared["arguments"]],
                 cwd=prepared["working_directory"],
@@ -593,9 +777,20 @@ def run_client(
                     )
     redacted_stdout = redact_text(stdout)
     redacted_stderr = redact_text(stderr)
-    execution["authentication_failed"] = _authentication_failed(
-        redacted_stdout, redacted_stderr
+    execution["authentication_failed"] = detect_authentication_failure(
+        redacted_stdout,
+        redacted_stderr,
+        list(prepared.get("authentication_failure_patterns", [])),
     )
+    classification = classify_authentication_failure(
+        redacted_stdout,
+        redacted_stderr,
+        list(prepared.get("authentication_failure_classifications", [])),
+    )
+    execution["authentication_failure_reason"] = classification["reason"]
+    execution["observed_authentication_mode"] = classification[
+        "observed_authentication_mode"
+    ]
     execution["end_time"] = utc_now()
     stdout_path.write_text(redacted_stdout, encoding="utf-8", newline="\n")
     stderr_path.write_text(redacted_stderr, encoding="utf-8", newline="\n")
@@ -621,6 +816,14 @@ def main() -> int:
     reserve.add_argument("--run-id")
     reserve.add_argument("--reuse", action="store_true")
 
+    reclassify = subparsers.add_parser("reclassify-execution")
+    reclassify.add_argument("--adapter", type=Path, required=True)
+    reclassify.add_argument("--schema", type=Path, required=True)
+    reclassify.add_argument("--source-execution", type=Path, required=True)
+    reclassify.add_argument("--stdout", type=Path, required=True)
+    reclassify.add_argument("--stderr", type=Path, required=True)
+    reclassify.add_argument("--output", type=Path, required=True)
+
     for command in ("prepare", "run-client"):
         child = subparsers.add_parser(command)
         child.add_argument("--adapter", type=Path, required=True)
@@ -636,6 +839,14 @@ def main() -> int:
     version = subparsers.add_parser("verify-version")
     version.add_argument("--adapter", type=Path, required=True)
     version.add_argument("--schema", type=Path, required=True)
+
+    secrets = subparsers.add_parser("verify-secrets")
+    secrets.add_argument("--adapter", type=Path, required=True)
+    secrets.add_argument("--schema", type=Path, required=True)
+
+    auth_selection = subparsers.add_parser("verify-auth-selection")
+    auth_selection.add_argument("--adapter", type=Path, required=True)
+    auth_selection.add_argument("--schema", type=Path, required=True)
 
     args = parser.parse_args()
     if args.command == "validate":
@@ -656,6 +867,32 @@ def main() -> int:
             )
         )
         return 0
+    if args.command == "reclassify-execution":
+        adapter = load_adapter(args.adapter, args.schema)
+        execution = json.loads(args.source_execution.read_text(encoding="utf-8"))
+        stdout = args.stdout.read_text(encoding="utf-8") if args.stdout.is_file() else ""
+        stderr = args.stderr.read_text(encoding="utf-8") if args.stderr.is_file() else ""
+        corrected = reclassify_client_execution(
+            execution,
+            stdout=stdout,
+            stderr=stderr,
+            authentication_failure_patterns=list(
+                adapter.get("authentication_failure_patterns", [])
+            ),
+            authentication_failure_classifications=list(
+                adapter.get("authentication_failure_classifications", [])
+            ),
+        )
+        write_json_atomic(args.output, corrected)
+        print(
+            json.dumps(
+                {
+                    "authentication_failed": corrected["authentication_failed"],
+                    "exit_code": corrected.get("exit_code"),
+                }
+            )
+        )
+        return 0
     if args.command == "verify-version":
         adapter = load_adapter(args.adapter, args.schema)
         prepared = {
@@ -665,6 +902,16 @@ def main() -> int:
         result = verify_client_version(prepared)
         print(json.dumps(result, ensure_ascii=False))
         return 0 if result["verified"] else 2
+    if args.command == "verify-secrets":
+        adapter = load_adapter(args.adapter, args.schema)
+        result = verify_inherited_secret_availability(adapter)
+        print(json.dumps(result))
+        return 0 if result["all_available"] else 2
+    if args.command == "verify-auth-selection":
+        adapter = load_adapter(args.adapter, args.schema)
+        result = verify_authentication_selection(adapter)
+        print(json.dumps(result))
+        return 0 if result["matches"] else 2
     adapter = load_adapter(args.adapter, args.schema)
     prepared = prepare_invocation(
         adapter,

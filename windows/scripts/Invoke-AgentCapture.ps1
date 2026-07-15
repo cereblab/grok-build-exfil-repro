@@ -66,6 +66,8 @@ $captureRoot = Join-Path $projectRoot 'captures'
 $derivedRoot = Join-Path $projectRoot 'analysis-output'
 $caCertificate = Join-Path $MitmproxyConfigDirectory 'mitmproxy-ca-cert.pem'
 $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+$captureStartupTimeoutSeconds = 35
+$proxyReadyTimeoutSeconds = 75
 
 foreach ($requiredPath in @($AdapterPath, $schemaPath, $generatorPath, $captureScriptPath, $analysisScriptPath, $addonPath)) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
@@ -73,8 +75,15 @@ foreach ($requiredPath in @($AdapterPath, $schemaPath, $generatorPath, $captureS
     }
 }
 
-$pythonCommand = Get-Command -Name 'python' -CommandType Application -ErrorAction SilentlyContinue |
-    Select-Object -First 1
+$workspacePython = Join-Path $projectRoot '.venv\Scripts\python.exe'
+$workspaceMitmdump = Join-Path $projectRoot '.venv\Scripts\mitmdump.exe'
+$pythonCommand = if (Test-Path -LiteralPath $workspacePython -PathType Leaf) {
+    [pscustomobject]@{ Source = $workspacePython }
+}
+else {
+    Get-Command -Name 'python' -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+}
 if ($null -eq $pythonCommand) {
     throw 'Python 3.12 is required. Activate the documented Windows virtual environment.'
 }
@@ -82,6 +91,10 @@ $pythonVersion = @(& $pythonCommand.Source -c 'import sys; print(".".join(map(st
 if ($LASTEXITCODE -ne 0 -or $pythonVersion -notmatch '^3\.12(?:\.|$)') {
     throw "Python 3.12 is required; active Python reported '$pythonVersion'."
 }
+if (-not (Test-Path -LiteralPath $workspaceMitmdump -PathType Leaf)) {
+    throw "Harness mitmdump executable is missing: $workspaceMitmdump. Install the documented Windows harness dependencies before creating a safety gate."
+}
+$resolvedMitmdumpPath = [System.IO.Path]::GetFullPath($workspaceMitmdump)
 
 function Invoke-RuntimeJson {
     param([Parameter(Mandatory)][string[]] $Arguments)
@@ -146,6 +159,16 @@ function Protect-SensitiveText {
     $redacted = [regex]::Replace(
         $redacted,
         '\bsk-[A-Za-z0-9_-]{12,}\b',
+        '[REDACTED_API_KEY]'
+    )
+    $redacted = [regex]::Replace(
+        $redacted,
+        '(?im)^(GEMINI_API_KEY\s*=\s*).*$',
+        '$1[REDACTED]'
+    )
+    $redacted = [regex]::Replace(
+        $redacted,
+        '\bAIza[A-Za-z0-9_-]{20,}\b',
         '[REDACTED_API_KEY]'
     )
     $redacted = [regex]::Replace(
@@ -215,6 +238,22 @@ $prepared = Invoke-RuntimeJson -Arguments @(
     '--proxy-port', $ProxyPort.ToString(),
     '--ca-certificate', $caCertificate
 )
+$secretVerification = Invoke-RuntimeJson -Arguments @(
+    'verify-secrets',
+    '--adapter', $AdapterPath,
+    '--schema', $schemaPath
+)
+if ($secretVerification.all_available -ne $true) {
+    throw 'A required adapter authentication secret is unavailable.'
+}
+$authenticationSelection = Invoke-RuntimeJson -Arguments @(
+    'verify-auth-selection',
+    '--adapter', $AdapterPath,
+    '--schema', $schemaPath
+)
+if ($authenticationSelection.matches -ne $true) {
+    throw 'The persisted client authentication selection does not match the adapter.'
+}
 $versionVerification = Invoke-RuntimeJson -Arguments @(
     'verify-version',
     '--adapter', $AdapterPath,
@@ -226,12 +265,15 @@ if ($versionVerification.verified -ne $true) {
 $versionVerificationPath = Join-Path $controlDirectory 'version-verification.json'
 Write-JsonFile -Path $versionVerificationPath -Value $versionVerification
 
+$escapedRunnerPath = $PSCommandPath.Replace("'", "''")
+$escapedAdapterPath = ([System.IO.Path]::GetFullPath($AdapterPath)).Replace("'", "''")
+$escapedPowerShellPath = (Join-Path $PSHOME 'pwsh.exe').Replace("'", "''")
 $approvalCommand = if ($PSCmdlet.ParameterSetName -eq 'FixedTest') {
-    "pwsh -NoProfile -File .\scripts\Invoke-AgentCapture.ps1 -TestId $TestId -RunId $($reservation.run_id) -ApproveLiveTraffic"
+    "& '$escapedPowerShellPath' -NoProfile -File '$escapedRunnerPath' -TestId $TestId -AdapterPath '$escapedAdapterPath' -RunId $($reservation.run_id) -ApproveLiveTraffic"
 }
 else {
     $escapedPrompt = $Prompt.Replace("'", "''")
-    "pwsh -NoProfile -File .\scripts\Invoke-AgentCapture.ps1 -Prompt '$escapedPrompt' -RunId $($reservation.run_id) -ApproveLiveTraffic"
+    "& '$escapedPowerShellPath' -NoProfile -File '$escapedRunnerPath' -Prompt '$escapedPrompt' -AdapterPath '$escapedAdapterPath' -RunId $($reservation.run_id) -ApproveLiveTraffic"
 }
 
 $gate = [ordered] @{
@@ -248,6 +290,12 @@ $gate = [ordered] @{
     version_stderr = $versionVerification.version_stderr
     version_exit_code = $versionVerification.version_exit_code
     normalized_client_version = $versionVerification.normalized_client_version
+    authentication_mode = $prepared.authentication_mode
+    authentication_secret_available = [bool] $secretVerification.all_available
+    authentication_selection_settings_file = $authenticationSelection.settings_file
+    selected_authentication_method = $authenticationSelection.selected_value
+    expected_authentication_method = $authenticationSelection.expected_value
+    authentication_selection_verified = [bool] $authenticationSelection.matches
     executable_found = $prepared.executable_found
     redacted_command = $prepared.redacted_command
     canary_repository = $canaryRepository
@@ -256,6 +304,10 @@ $gate = [ordered] @{
     control_directory = $controlDirectory
     analysis_directory = $analysisDirectory
     report_directory = $reportDirectory
+    capture_startup_timeout_seconds = $captureStartupTimeoutSeconds
+    proxy_ready_timeout_seconds = $proxyReadyTimeoutSeconds
+    client_timeout_seconds = $prepared.timeout_seconds
+    mitmdump_executable_path = $resolvedMitmdumpPath
     proxy_environment_variables = $prepared.environment_variables
     certificate_store_change = 'Import the mitmproxy CA into Cert:\CurrentUser\Root for this user.'
     prompt = $Prompt
@@ -280,6 +332,12 @@ if ($ApproveLiveTraffic) {
         'version_stderr',
         'version_exit_code',
         'normalized_client_version',
+        'authentication_mode',
+        'authentication_secret_available',
+        'authentication_selection_settings_file',
+        'selected_authentication_method',
+        'expected_authentication_method',
+        'authentication_selection_verified',
         'executable_found',
         'redacted_command',
         'canary_repository',
@@ -288,6 +346,10 @@ if ($ApproveLiveTraffic) {
         'control_directory',
         'analysis_directory',
         'report_directory',
+        'capture_startup_timeout_seconds',
+        'proxy_ready_timeout_seconds',
+        'client_timeout_seconds',
+        'mitmdump_executable_path',
         'proxy_environment_variables',
         'certificate_store_change',
         'prompt'
@@ -305,15 +367,17 @@ else {
 $gate | ConvertTo-Json -Depth 6
 
 if (-not $ApproveLiveTraffic) {
-    Write-Host 'Preview complete. Codex and mitmproxy were not launched.'
+    Write-Host "Preview complete. $($prepared.product) and mitmproxy were not launched."
     Write-Host "Approval command: $($gate.approval_command)"
     return
 }
 
-$pwshCommand = Get-Command -Name 'pwsh' -CommandType Application -ErrorAction Stop |
-    Select-Object -First 1
+$pwshPath = Join-Path $PSHOME 'pwsh.exe'
+if (-not (Test-Path -LiteralPath $pwshPath -PathType Leaf)) {
+    throw "PowerShell executable is unavailable at $pwshPath."
+}
 $proxyStartInfo = [System.Diagnostics.ProcessStartInfo]::new()
-$proxyStartInfo.FileName = $pwshCommand.Source
+$proxyStartInfo.FileName = $pwshPath
 $proxyStartInfo.UseShellExecute = $false
 $proxyStartInfo.CreateNoWindow = $true
 $proxyStartInfo.RedirectStandardOutput = $true
@@ -323,6 +387,8 @@ foreach ($argument in @(
     '-RunDirectory', $captureDirectory,
     '-ListenPort', $ProxyPort.ToString(),
     '-MitmproxyConfigDirectory', $MitmproxyConfigDirectory,
+    '-MitmdumpExecutable', $resolvedMitmdumpPath,
+    '-StartupTimeoutSeconds', $captureStartupTimeoutSeconds.ToString(),
     '-StopFile', $stopFile
 )) {
     $proxyStartInfo.ArgumentList.Add($argument)
@@ -346,7 +412,7 @@ try {
     $proxyProcessWasStarted = $true
     $proxyStdoutTask = $proxyProcess.StandardOutput.ReadToEndAsync()
     $proxyStderrTask = $proxyProcess.StandardError.ReadToEndAsync()
-    $deadline = [DateTimeOffset]::UtcNow.AddSeconds(75)
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($proxyReadyTimeoutSeconds)
     while ([DateTimeOffset]::UtcNow -lt $deadline) {
         if ($proxyProcess.HasExited) {
             break
@@ -369,7 +435,7 @@ try {
         Start-Sleep -Milliseconds 200
     }
     if (-not $proxyStarted) {
-        throw "The capture launcher did not durably record PROXY_RUNNING on 127.0.0.1:$ProxyPort within 75 seconds."
+        throw "The capture launcher did not durably record PROXY_RUNNING on 127.0.0.1:$ProxyPort within $proxyReadyTimeoutSeconds seconds."
     }
 
     Write-JsonFile -Path (Join-Path $controlDirectory 'proxy-status.json') -Value ([ordered] @{
@@ -390,7 +456,16 @@ try {
             --ca-certificate $caCertificate `
             --version-verification $versionVerificationPath `
             --output-directory $controlDirectory 2>&1)
-        $clientRuntimeExitCode = $LASTEXITCODE
+        $agentRuntimeInvocationExitCode = $LASTEXITCODE
+        $clientRuntimeExitCode = $agentRuntimeInvocationExitCode
+        $clientExecutionPath = Join-Path $controlDirectory 'client-execution.json'
+        if (Test-Path -LiteralPath $clientExecutionPath -PathType Leaf) {
+            $clientExecutionRecord = Get-Content -LiteralPath $clientExecutionPath -Raw |
+                ConvertFrom-Json
+            if ($null -ne $clientExecutionRecord.exit_code) {
+                $clientRuntimeExitCode = [int] $clientExecutionRecord.exit_code
+            }
+        }
         [System.IO.File]::WriteAllText(
             (Join-Path $controlDirectory 'runtime-result.txt'),
             (($clientOutput -join [Environment]::NewLine) + [Environment]::NewLine),
@@ -554,6 +629,7 @@ if (-not $proxyStarted) {
         -RunDirectory $captureDirectory `
         -OutputRoot $outputRoot `
         -ExpectedCanaryRepository $canaryRepository `
+        -AdapterPath $AdapterPath `
         -CaptureStatus ([string] $failureOutcome.final_status)
     throw "Capture startup failed before the client was launched. Report: $(Join-Path $reportDirectory 'report.md'). $proxyError"
 }
@@ -582,6 +658,7 @@ $coverage = Get-Content -LiteralPath (Join-Path $controlDirectory 'coverage.json
     -RunDirectory $captureDirectory `
     -OutputRoot $outputRoot `
     -ExpectedCanaryRepository $canaryRepository `
+    -AdapterPath $AdapterPath `
     -CaptureStatus ([string] $coverage.capture_status)
 if ($LASTEXITCODE -ne 0) {
     throw "Evidence analysis failed with exit code $LASTEXITCODE."

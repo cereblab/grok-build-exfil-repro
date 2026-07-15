@@ -47,6 +47,7 @@
       ]
     },
     "client_version": {"type": ["string", "null"]},
+    "authentication_mode": {"type": ["string", "null"]},
     "capture_outcome": {
       "type": "object",
       "properties": {

@@ -404,7 +404,7 @@ class ClassificationTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            run = _create_run(root, [{"data": b"ordinary payload"}])
+            run = _create_run(root, [{"data": marker + b" http request payload"}])
             websocket_records = []
             for sequence, direction in enumerate(
                 ("client_to_server", "server_to_client"), 1
@@ -438,11 +438,19 @@ class ClassificationTests(unittest.TestCase):
                 for item in result["canary_findings"]
                 if item["canary_name"] == "allowed_file_first_line_canary"
             ]
-            self.assertEqual(2, len(findings))
+            self.assertEqual(3, len(findings))
             self.assertEqual(
                 {"client_to_server", "server_to_client"},
                 {item["direction"] for item in findings},
             )
+            self.assertEqual(
+                2,
+                sum(item["direction"] == "client_to_server" for item in findings),
+            )
+            http_finding = next(
+                item for item in findings if item["transport"] == "http"
+            )
+            self.assertEqual(1, http_finding["request_sequence_number"])
             self.assertEqual(
                 "repository_inventory_metadata",
                 result["canary_inventory_sources"][0]["source"],
@@ -462,7 +470,7 @@ class ClassificationTests(unittest.TestCase):
             )
             report = build_report(run, derived)
             self.assertEqual(
-                1,
+                2,
                 report["allowed_file_first_line_summary"]["client_to_server_occurrences"],
             )
             self.assertEqual(
@@ -470,7 +478,7 @@ class ClassificationTests(unittest.TestCase):
                 report["allowed_file_first_line_summary"]["server_to_client_occurrences"],
             )
             markdown = render_markdown(report)
-            self.assertIn("client-to-server=1, server-to-client=1", markdown)
+            self.assertIn("client-to-server=2, server-to-client=1", markdown)
             self.assertIn("does not establish that the full file", markdown)
 
 

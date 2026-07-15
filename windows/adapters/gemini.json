@@ -3,10 +3,11 @@
   "product_name": "Gemini CLI",
   "vendor": "Google",
   "client_surface": "CLI",
-  "executable": "gemini",
+  "executable": "C:\\Users\\jande\\AppData\\Roaming\\npm\\gemini.cmd",
   "version_command": ["--version"],
   "noninteractive_command_template": [
     "--approval-mode", "plan",
+    "--skip-trust",
     "--output-format", "json",
     "--include-directories", "{working_directory}",
     "--prompt", "{prompt}"
@@ -18,19 +19,42 @@
   },
   "timeout_seconds": 300,
   "expected_vendor_hosts": [],
-  "authentication_mode": "UNVERIFIED: do not authenticate or inspect credentials during offline preparation",
+  "authentication_mode": "Gemini CLI 0.50.0, API-key mode",
+  "inherited_secret_environment_variables": [
+    "GEMINI_API_KEY"
+  ],
+  "authentication_failure_patterns": [
+    "(?i)please\\s+set\\s+an\\s+auth\\s+method",
+    "(?i)error\\s+authenticating",
+    "(?i)IneligibleTierError",
+    "(?i)UNSUPPORTED_CLIENT"
+  ],
+  "authentication_failure_classifications": [
+    {
+      "pattern": "(?i)IneligibleTierError|UNSUPPORTED_CLIENT",
+      "reason": "UNSUPPORTED_CLIENT",
+      "observed_authentication_mode": "cached Google sign-in / Gemini Code Assist individual tier"
+    }
+  ],
+  "authentication_selection": {
+    "settings_file": "~/.gemini/settings.json",
+    "json_path": ["security", "auth", "selectedType"],
+    "expected_value": "gemini-api-key"
+  },
   "model_identifier": null,
-  "approval_mode": "documented plan mode; local behavior UNVERIFIED",
-  "sandbox_mode": "documented --sandbox capability; not enabled and Windows behavior UNVERIFIED",
+  "approval_mode": "local --help verified --approval-mode plan as read-only; actual tool behavior remains unverified until an approved live run",
+  "sandbox_mode": "local --help verified --sandbox; it is intentionally not enabled because native Windows provider behavior and its effect on proxy routing are unverified",
   "notes": [
-    "The executable path, installed version, authentication state, proxy routing, certificate trust, expected hosts, and command behavior are UNVERIFIED.",
-    "The official CLI documents --prompt, --output-format json, --approval-mode, and --include-directories. This template must be checked with local --help after approved installation.",
+    "Gemini CLI 0.50.0 was installed from the official @google/gemini-cli package at the user-scoped npm prefix. The local executable and --version output were verified without submitting a prompt.",
+    "Local --help accepts --prompt, --output-format json, --approval-mode plan, --skip-trust, and --include-directories. The template keeps plan mode and omits --sandbox and yolo/auto-edit modes.",
     "HTTP_PROXY and HTTPS_PROXY plus NODE_EXTRA_CA_CERTS are candidate test variables only; successful interception and CA trust require empirical validation.",
-    "No credential environment variable is supplied by this adapter."
+    "The generic runner passes the configured user-scope API key directly to the child environment without serializing its value into the adapter, safety gate, command, logs, or reports.",
+    "The runner verifies that the persisted Gemini selector is gemini-api-key before preview and again before live execution."
   ],
   "limitations": [
-    "No Gemini executable has been installed, authenticated, invoked, or observed by this harness.",
-    "The official documentation reviewed does not provide a standalone noninteractive authentication-status command; authentication state is UNVERIFIED.",
+    "The earlier unauthenticated Test A exited 41 before vendor traffic and remains a separate preserved result.",
+    "The first API-key-labeled Test A reused cached Google sign-in, reached an unsupported individual Code Assist path, and is preserved as a separate failed-authentication result rather than an API-key-mode result.",
+    "The persisted API-key selector and key presence are verified offline, but API-key acceptance can only be established by the separately approved live Test A request.",
     "An empty expected_vendor_hosts list deliberately avoids treating unvalidated host guesses as capture expectations."
   ]
 }

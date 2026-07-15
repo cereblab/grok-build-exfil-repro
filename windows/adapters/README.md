@@ -2,9 +2,13 @@
 
 Adapters are versioned data files consumed by the generic
 `scripts/Invoke-AgentCapture.ps1` runner. `codex.json` is the Phase 3A adapter.
-`gemini.json` and `claude.json` are offline preparation templates only: neither
-executable, version, login state, proxy behavior, CA behavior, nor live traffic
-has been verified. No Grok Build or Antigravity adapter is included.
+`gemini.json` has an installed local executable and verified version/help syntax.
+An earlier Test A established that no authentication method was configured and
+remains preserved. A separate Gemini CLI 0.50.0 API-key-mode gate can now pass a
+user-scoped key without serializing it; proxy, CA, and authenticated behavior
+remain unverified until an approved live run.
+`claude.json` remains an offline preparation template. No
+Grok Build or Antigravity adapter is included.
 
 The schema is `schema/adapter.schema.json` and the current schema version is
 `egress-adapter/v1`. Validate the checked-in adapter without launching a client:
@@ -19,15 +23,26 @@ python -m analysis.agent_runtime validate `
 
 An adapter defines an executable, version arguments, a noninteractive argument
 template, environment variables, timeout, expected hosts, authentication mode,
-model, approval mode, sandbox mode, and limitations. `{working_directory}` and
-`{prompt}` are required command placeholders. `{proxy_port}` and
-`{ca_certificate}` can be used in adapter-defined environment values.
+optional authentication-failure regular expressions, model, approval mode,
+sandbox mode, limitations, and optional names of allowlisted inherited secret
+environment variables. `{working_directory}` and `{prompt}` are required
+command placeholders. `{proxy_port}` and `{ca_certificate}` can be used in
+adapter-defined environment values. Authentication-failure patterns are applied
+to the already-redacted client stdout and stderr.
 
-Credential environment variables are rejected. The runner constructs a child
+Credential values in adapter environment variables are rejected. The runner constructs a child
 environment from a small Windows runtime/location allowlist, removes inherited
 proxy/certificate values, and then applies the adapter's exact environment. It
-does not inherit arbitrary shell variables such as API keys. `USERPROFILE`,
-`APPDATA`, `LOCALAPPDATA`, and optional `CODEX_HOME` remain available so existing
+does not inherit arbitrary shell variables. An adapter may explicitly request a
+supported secret name such as `GEMINI_API_KEY`; the runtime resolves it only for
+the client child process and records only whether it was available. Secret
+values are never placed in adapter preparation, safety gates, commands, logs, or
+reports.
+
+An adapter may also declare an `authentication_selection` consisting of a JSON
+settings path, a field path, and an expected nonsecret value. Preview and live
+execution both verify that selector and bind it into the saved safety gate.
+`USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, and optional `CODEX_HOME` remain available so existing
 persisted Codex login state can be used without the harness reading or copying
 it.
 
@@ -80,11 +95,12 @@ environment, and prompt may a human run the exact printed `approval_command`.
 That command binds `-ApproveLiveTraffic` to the saved run ID; changed gate data
 is rejected.
 
-## Prepared Gemini and Claude templates
+## Gemini and Claude adapters
 
-The Gemini and Claude templates use only their vendors' documented global npm
-package, version, and noninteractive command syntax. The proposed user-scope
-npm prefix is a local policy choice and must be reviewed before installation.
-Their adapter fields deliberately state `UNVERIFIED` where local installation,
-authentication, routing, certificate trust, or executable behavior has not been
-tested. Validate each adapter offline before a separate installation gate.
+Gemini CLI and Claude Code are installed at user scope using their vendors'
+official distribution methods. Claude Code uses Anthropic's native Windows
+binary at `C:\Users\jande\.local\bin\claude.exe`; local help and version behavior
+are verified, while `claude auth status` confirms it is not logged in. Its Test
+A command disables all built-in tools and customizations. Authentication,
+routing, certificate trust, and live behavior still require separate approval
+and empirical validation.

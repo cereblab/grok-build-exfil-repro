@@ -103,16 +103,28 @@ def _websocket_metadata(run_directory: Path) -> dict[str, dict[str, Any]]:
     return records
 
 
+def _http_metadata(run_directory: Path) -> dict[str, dict[str, Any]]:
+    records: dict[str, dict[str, Any]] = {}
+    for record in _read_jsonl(run_directory / "requests.jsonl"):
+        raw_file = record.get("raw_body_file")
+        if isinstance(raw_file, str):
+            records[raw_file] = record
+    return records
+
+
 def _load_artifacts(
     run_directory: Path, derived_directory: Path
 ) -> list[dict[str, Any]]:
     artifacts: list[dict[str, Any]] = []
     raw_root = run_directory / "raw"
     websocket_records = _websocket_metadata(run_directory)
+    request_records = _http_metadata(run_directory)
     if raw_root.is_dir():
         for path in sorted(item for item in raw_root.rglob("*") if item.is_file()):
             relative = path.relative_to(run_directory).as_posix()
             websocket_record = websocket_records.get(relative, {})
+            request_record = request_records.get(relative, {})
+            capture_record = websocket_record or request_record
             artifacts.append(
                 {
                     "path": relative,
@@ -121,10 +133,15 @@ def _load_artifacts(
                     "source_raw_file": relative,
                     "extraction_path": [relative],
                     "transport": "websocket" if relative.startswith("raw/websocket/") else "http",
-                    "direction": websocket_record.get("direction"),
+                    "direction": (
+                        websocket_record.get("direction")
+                        if websocket_record
+                        else "client_to_server" if request_record else None
+                    ),
                     "message_sequence_number": websocket_record.get("message_sequence_number"),
-                    "host": websocket_record.get("host"),
-                    "websocket_path": websocket_record.get("path"),
+                    "request_sequence_number": request_record.get("request_sequence_number"),
+                    "host": capture_record.get("host"),
+                    "websocket_path": capture_record.get("path"),
                 }
             )
 
@@ -160,6 +177,9 @@ def _load_artifacts(
     for output_file, artifact in sorted(by_output.items()):
         relationships = artifact.get("relationships", [])
         source_raw = relationships[0].get("source_raw_file") if relationships else None
+        websocket_record = websocket_records.get(source_raw, {}) if source_raw else {}
+        request_record = request_records.get(source_raw, {}) if source_raw else {}
+        capture_record = websocket_record or request_record
         artifacts.append(
             {
                 "path": output_file,
@@ -168,7 +188,15 @@ def _load_artifacts(
                 "source_raw_file": source_raw,
                 "extraction_path": extraction_chain(output_file),
                 "transport": "derived",
-                "direction": None,
+                "direction": (
+                    websocket_record.get("direction")
+                    if websocket_record
+                    else "client_to_server" if request_record else None
+                ),
+                "message_sequence_number": websocket_record.get("message_sequence_number"),
+                "request_sequence_number": request_record.get("request_sequence_number"),
+                "host": capture_record.get("host"),
+                "websocket_path": capture_record.get("path"),
             }
         )
     return artifacts
@@ -215,6 +243,7 @@ def classify_evidence(
                         "transport": artifact.get("transport"),
                         "direction": artifact.get("direction"),
                         "message_sequence_number": artifact.get("message_sequence_number"),
+                        "request_sequence_number": artifact.get("request_sequence_number"),
                         "host": artifact.get("host"),
                         "path": artifact.get("websocket_path"),
                         "surrounding_context_sha256": sha256_bytes(context),

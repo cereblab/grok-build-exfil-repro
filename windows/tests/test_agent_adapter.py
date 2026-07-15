@@ -14,14 +14,18 @@ sys.path.insert(0, str(WINDOWS_ROOT))
 
 from analysis.agent_runtime import (
     build_child_environment,
+    detect_authentication_failure,
     gate_identity_changes,
     load_adapter,
     prepare_invocation,
+    reclassify_client_execution,
     redact_text,
     reserve_run_directories,
     run_client,
     substitute,
     verify_client_version,
+    verify_authentication_selection,
+    verify_inherited_secret_availability,
 )
 from analysis.generate_report import generate_reports
 from analysis.models import (
@@ -38,6 +42,8 @@ from analysis.reconcile_capture_outcome import (
 
 
 ADAPTER_PATH = WINDOWS_ROOT / "adapters" / "codex.json"
+GEMINI_ADAPTER_PATH = WINDOWS_ROOT / "adapters" / "gemini.json"
+CLAUDE_ADAPTER_PATH = WINDOWS_ROOT / "adapters" / "claude.json"
 SCHEMA_PATH = WINDOWS_ROOT / "adapters" / "schema" / "adapter.schema.json"
 
 
@@ -47,18 +53,29 @@ def _prepared(
     *,
     timeout_seconds: int = 10,
     environment: dict[str, str] | None = None,
+    authentication_failure_patterns: list[str] | None = None,
+    authentication_failure_classifications: list[dict[str, str]] | None = None,
+    inherited_secret_environment_variables: list[str] | None = None,
 ) -> dict[str, object]:
     return {
         "product": "Synthetic Client",
         "vendor": "Test",
         "client_surface": "CLI",
+        "authentication_mode": "synthetic authentication",
         "executable": sys.executable,
         "arguments": arguments,
         "redacted_command": "synthetic command",
         "environment_variables": environment or {},
+        "inherited_secret_environment_variables": (
+            inherited_secret_environment_variables or []
+        ),
         "prompt": "synthetic prompt",
         "working_directory": str(working_directory),
         "timeout_seconds": timeout_seconds,
+        "authentication_failure_patterns": authentication_failure_patterns or [],
+        "authentication_failure_classifications": (
+            authentication_failure_classifications or []
+        ),
         "model_identifier": None,
         "version_command": ["--version"],
     }
@@ -174,6 +191,107 @@ class AdapterValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             substitute("{prompt}-{missing}", {"prompt": "x"})
 
+    def test_installed_gemini_adapter_uses_read_only_headless_template(self) -> None:
+        adapter = load_adapter(GEMINI_ADAPTER_PATH, SCHEMA_PATH)
+        self.assertEqual("Gemini CLI", adapter["product_name"])
+        self.assertEqual("Google", adapter["vendor"])
+        self.assertEqual("gemini.cmd", Path(adapter["executable"]).name)
+        self.assertIn("plan", adapter["noninteractive_command_template"])
+        self.assertIn("--skip-trust", adapter["noninteractive_command_template"])
+        self.assertNotIn("--sandbox", adapter["noninteractive_command_template"])
+        self.assertNotIn("--yolo", adapter["noninteractive_command_template"])
+        self.assertTrue(adapter["authentication_failure_patterns"])
+        self.assertEqual(
+            "Gemini CLI 0.50.0, API-key mode", adapter["authentication_mode"]
+        )
+        self.assertEqual(
+            ["GEMINI_API_KEY"],
+            adapter["inherited_secret_environment_variables"],
+        )
+        self.assertEqual(
+            "gemini-api-key",
+            adapter["authentication_selection"]["expected_value"],
+        )
+
+    def test_authentication_selection_reads_only_declared_json_field(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="adapter-auth-selection-") as temporary:
+            settings = Path(temporary) / "settings.json"
+            settings.write_text(
+                json.dumps(
+                    {
+                        "security": {"auth": {"selectedType": "gemini-api-key"}},
+                        "account": {"email": "must-not-be-returned@example.invalid"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = verify_authentication_selection(
+                {
+                    "authentication_selection": {
+                        "settings_file": str(settings),
+                        "json_path": ["security", "auth", "selectedType"],
+                        "expected_value": "gemini-api-key",
+                    }
+                }
+            )
+            self.assertTrue(result["matches"])
+            self.assertEqual("gemini-api-key", result["selected_value"])
+            self.assertNotIn("must-not-be-returned", json.dumps(result))
+
+    def test_authentication_selection_mismatch_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="adapter-auth-selection-") as temporary:
+            settings = Path(temporary) / "settings.json"
+            settings.write_text(
+                '{"security":{"auth":{"selectedType":"oauth-personal"}}}',
+                encoding="utf-8",
+            )
+            result = verify_authentication_selection(
+                {
+                    "authentication_selection": {
+                        "settings_file": str(settings),
+                        "json_path": ["security", "auth", "selectedType"],
+                        "expected_value": "gemini-api-key",
+                    }
+                }
+            )
+            self.assertFalse(result["matches"])
+
+    def test_adapter_cannot_store_or_request_unsupported_secrets(self) -> None:
+        adapter = load_adapter(GEMINI_ADAPTER_PATH, SCHEMA_PATH)
+        stored = dict(adapter)
+        stored["environment_variables"] = {
+            **adapter["environment_variables"],
+            "GEMINI_API_KEY": "not-allowed",
+        }
+        with self.assertRaises(ValueError):
+            from analysis.agent_runtime import validate_adapter_semantics
+
+            validate_adapter_semantics(stored)
+        unsupported = dict(adapter)
+        unsupported["inherited_secret_environment_variables"] = ["UNKNOWN_SECRET"]
+        with self.assertRaises(ValueError):
+            validate_adapter_semantics(unsupported)
+
+    def test_installed_claude_adapter_limits_test_b_to_read_tool(self) -> None:
+        adapter = load_adapter(CLAUDE_ADAPTER_PATH, SCHEMA_PATH)
+        template = adapter["noninteractive_command_template"]
+        self.assertEqual("Claude Code", adapter["product_name"])
+        self.assertEqual("Anthropic", adapter["vendor"])
+        self.assertEqual("claude.exe", Path(adapter["executable"]).name)
+        self.assertIn("--safe-mode", template)
+        self.assertIn("--strict-mcp-config", template)
+        self.assertIn("--tools=Read", template)
+        self.assertIn("--no-session-persistence", template)
+        self.assertIn("plan", template)
+        self.assertNotIn("--dangerously-skip-permissions", template)
+        self.assertNotIn("--max-turns", template)
+        self.assertNotIn("Bash", " ".join(template))
+        self.assertNotIn("Edit", " ".join(template))
+        self.assertNotIn("Glob", " ".join(template))
+        self.assertNotIn("Grep", " ".join(template))
+        self.assertTrue(adapter["authentication_failure_patterns"])
+        self.assertNotIn("ANTHROPIC_API_KEY", adapter["environment_variables"])
+
 
 class ClientRuntimeTests(unittest.TestCase):
     def test_version_command_success_and_client_execution_receives_version(self) -> None:
@@ -197,6 +315,7 @@ class ClientRuntimeTests(unittest.TestCase):
             self.assertEqual("codex-cli 0.144.4", result["client_version"])
             self.assertEqual(0, saved["version_exit_code"])
             self.assertEqual("codex-cli 0.144.4", saved["normalized_client_version"])
+            self.assertEqual("synthetic authentication", saved["authentication_mode"])
 
     def test_version_command_failure(self) -> None:
         prepared = {"executable": sys.executable, "version_command": ["--version"]}
@@ -274,11 +393,70 @@ class ClientRuntimeTests(unittest.TestCase):
         self.assertNotIn("PARENT_ONLY", child)
         self.assertEqual("must-not-propagate", base["CODEX_API_KEY"])
 
+    def test_declared_secret_is_passed_without_serialization(self) -> None:
+        synthetic_secret = "AIzaSyntheticValueThatMustNeverBePersisted123"
+        with tempfile.TemporaryDirectory(prefix="adapter-secret-") as temporary:
+            root = Path(temporary)
+            prepared = _prepared(
+                root,
+                [
+                    "-c",
+                    "import os; print(os.environ.get('GEMINI_API_KEY') is not None)",
+                ],
+                inherited_secret_environment_variables=["GEMINI_API_KEY"],
+            )
+            availability = verify_inherited_secret_availability(
+                {"inherited_secret_environment_variables": ["GEMINI_API_KEY"]},
+                {"GEMINI_API_KEY": synthetic_secret},
+            )
+            self.assertEqual(
+                {"required_count": 1, "available_count": 1, "all_available": True},
+                availability,
+            )
+            result = run_client(
+                prepared,
+                root / "output",
+                base_environment={"GEMINI_API_KEY": synthetic_secret},
+                snapshot_provider=_snapshot,
+            )
+            self.assertEqual(0, result["exit_code"])
+            self.assertEqual("True\n", (root / "output" / "client-stdout.txt").read_text())
+            persisted = "".join(
+                path.read_text(encoding="utf-8")
+                for path in (root / "output").iterdir()
+                if path.is_file()
+            )
+            self.assertNotIn(synthetic_secret, persisted)
+            self.assertNotIn(synthetic_secret, json.dumps(prepared))
+
+    def test_missing_declared_secret_fails_before_client_launch(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="adapter-secret-missing-") as temporary:
+            root = Path(temporary)
+            prepared = _prepared(
+                root,
+                ["-c", "print('must not run')"],
+                inherited_secret_environment_variables=["GEMINI_API_KEY"],
+            )
+            availability = verify_inherited_secret_availability(
+                {"inherited_secret_environment_variables": ["GEMINI_API_KEY"]},
+                {},
+            )
+            self.assertFalse(availability["all_available"])
+            result = run_client(
+                prepared,
+                root / "output",
+                base_environment={},
+                snapshot_provider=_snapshot,
+            )
+            self.assertFalse(result["started"])
+            self.assertIn("required inherited secret", result["error"])
+
     def test_sensitive_values_are_redacted(self) -> None:
         original = (
             "Authorization: Bearer secret-token\n"
             "email=user@example.com sk-abcdefghijklmnopqrstuvwxyz "
-            '"session_id":"session-secret" org_abcdefghijk'
+            '"session_id":"session-secret" org_abcdefghijk\n'
+            'GEMINI_API_KEY=AIzaSyntheticValueThatMustNeverBePersisted123'
         )
         redacted = redact_text(original)
         for forbidden in (
@@ -287,6 +465,7 @@ class ClientRuntimeTests(unittest.TestCase):
             "sk-abcdefghijklmnopqrstuvwxyz",
             "session-secret",
             "org_abcdefghijk",
+            "AIzaSyntheticValueThatMustNeverBePersisted123",
         ):
             self.assertNotIn(forbidden, redacted)
 
@@ -375,6 +554,62 @@ class ClientRuntimeTests(unittest.TestCase):
             self.assertTrue(result["authentication_failed"])
             self.assertEqual(1, result["exit_code"])
 
+    def test_adapter_pattern_detects_vendor_authentication_failure(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="adapter-vendor-auth-") as temporary:
+            root = Path(temporary)
+            result = run_client(
+                _prepared(
+                    root,
+                    [
+                        "-c",
+                        "import sys; print('Configure cloud identity before running'); sys.exit(41)",
+                    ],
+                    authentication_failure_patterns=[r"(?i)configure\s+cloud\s+identity"],
+                ),
+                root / "output",
+                snapshot_provider=_snapshot,
+            )
+            self.assertTrue(result["authentication_failed"])
+            self.assertEqual(41, result["exit_code"])
+
+    def test_ineligible_tier_failure_records_observed_authentication_mode(self) -> None:
+        corrected = reclassify_client_execution(
+            {"exit_code": 1, "authentication_failed": False},
+            stdout="Error authenticating: IneligibleTierError: UNSUPPORTED_CLIENT",
+            stderr="",
+            authentication_failure_patterns=[r"(?i)error\s+authenticating"],
+            authentication_failure_classifications=[
+                {
+                    "pattern": r"(?i)IneligibleTierError|UNSUPPORTED_CLIENT",
+                    "reason": "UNSUPPORTED_CLIENT",
+                    "observed_authentication_mode": "cached Google sign-in",
+                }
+            ],
+        )
+        self.assertTrue(corrected["authentication_failed"])
+        self.assertEqual("UNSUPPORTED_CLIENT", corrected["authentication_failure_reason"])
+        self.assertEqual(
+            "cached Google sign-in", corrected["observed_authentication_mode"]
+        )
+
+    def test_non_authentication_failure_is_not_misclassified(self) -> None:
+        execution = {"exit_code": 41, "authentication_failed": True}
+        corrected = reclassify_client_execution(
+            execution,
+            stdout="Synthetic operational failure",
+            stderr="",
+            authentication_failure_patterns=[r"(?i)configure\s+cloud\s+identity"],
+        )
+        self.assertFalse(corrected["authentication_failed"])
+        self.assertEqual(41, corrected["exit_code"])
+        self.assertFalse(
+            detect_authentication_failure(
+                "Synthetic operational failure",
+                "",
+                [r"(?i)configure\s+cloud\s+identity"],
+            )
+        )
+
 
 class CoverageAndReportTests(unittest.TestCase):
     def test_reconciled_status_controls_top_level_exit_code(self) -> None:
@@ -398,6 +633,23 @@ class CoverageAndReportTests(unittest.TestCase):
         self.assertIn("$finalOutcome.final_status", runner)
         self.assertIn("if ($finalStatus -ne 'CAPTURE_VALIDATED')", runner)
         self.assertIn("exit 1", runner)
+        self.assertIn("-AdapterPath '$escapedAdapterPath'", runner)
+        self.assertIn("$escapedPowerShellPath", runner)
+        self.assertIn("$workspacePython", runner)
+        self.assertIn("capture_startup_timeout_seconds", runner)
+        self.assertIn("$proxyReadyTimeoutSeconds", runner)
+        self.assertIn("$workspaceMitmdump", runner)
+        self.assertIn("Harness mitmdump executable is missing", runner)
+        self.assertIn("'-MitmdumpExecutable', $resolvedMitmdumpPath", runner)
+        self.assertIn("mitmdump_executable_path", runner)
+        self.assertIn("'verify-secrets'", runner)
+        self.assertIn("authentication_secret_available", runner)
+        self.assertIn("'verify-auth-selection'", runner)
+        self.assertIn("authentication_selection_verified", runner)
+        self.assertIn(
+            "$clientRuntimeExitCode = [int] $clientExecutionRecord.exit_code",
+            runner,
+        )
 
     def test_offline_reanalysis_reconciles_source_control_before_reporting(self) -> None:
         script = (WINDOWS_ROOT / "scripts" / "Invoke-EvidenceAnalysis.ps1").read_text(
@@ -406,6 +658,9 @@ class CoverageAndReportTests(unittest.TestCase):
         self.assertIn("'launcher-outcome.json'", script)
         self.assertIn("'shutdown-request.json'", script)
         self.assertIn("analysis.reconcile_capture_outcome", script)
+        self.assertIn("analysis.agent_runtime", script)
+        self.assertIn("reclassify-execution", script)
+        self.assertIn("$workspacePython", script)
 
     def _status(self, **overrides: object) -> str:
         values: dict[str, object] = {
@@ -667,6 +922,38 @@ class CoverageAndReportTests(unittest.TestCase):
             self.assertEqual(str(layout.output_root), report["output_layout"]["output_root"])
             self.assertEqual(layout.report, json_path.parent)
             self.assertIn("Client execution and capture coverage", markdown)
+
+            failed_execution = {
+                **json.loads(
+                    (control / "client-execution.json").read_text(encoding="utf-8")
+                ),
+                "exit_code": 41,
+                "authentication_failed": True,
+            }
+            write_json_atomic(control / "client-execution.json", failed_execution)
+            failed_outcome = self._final_outcome(
+                client_exit_code=41,
+                authentication_failed=True,
+            )
+            write_json_atomic(control / "capture-outcome.json", failed_outcome)
+            json_path, markdown_path = generate_reports(
+                run,
+                analysis,
+                "CLIENT_EXECUTION_FAILED",
+                control_directory=control,
+                report_directory=layout.report,
+            )
+            failed_report = json.loads(json_path.read_text(encoding="utf-8"))
+            failed_markdown = markdown_path.read_text(encoding="utf-8")
+            self.assertEqual(
+                "CLIENT_EXECUTION_FAILED", failed_report["capture_status"]
+            )
+            self.assertEqual(41, failed_report["client_execution"]["exit_code"])
+            self.assertTrue(
+                failed_report["client_execution"]["authentication_failed"]
+            )
+            self.assertIn("- Exit code: `41`", failed_markdown)
+            self.assertIn("- Authentication failed: `True`", failed_markdown)
 
     def test_failed_start_report_has_zero_counts_and_no_client_launch(self) -> None:
         with tempfile.TemporaryDirectory(prefix="failed-start-report-") as temporary:

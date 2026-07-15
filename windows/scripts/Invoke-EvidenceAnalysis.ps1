@@ -18,6 +18,9 @@ param(
     [string] $SourceControlDirectory,
 
     [Parameter()]
+    [string] $AdapterPath,
+
+    [Parameter()]
     [ValidateRange(1, 100)]
     [int] $MaximumExtractionDepth = 6,
 
@@ -56,8 +59,15 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 
-$pythonCommand = Get-Command -Name 'python' -CommandType Application -ErrorAction SilentlyContinue |
-    Select-Object -First 1
+$projectRoot = Split-Path $PSScriptRoot -Parent
+$workspacePython = Join-Path $projectRoot '.venv\Scripts\python.exe'
+if (Test-Path -LiteralPath $workspacePython -PathType Leaf) {
+    $pythonCommand = [pscustomobject] @{ Source = $workspacePython }
+}
+else {
+    $pythonCommand = Get-Command -Name 'python' -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+}
 if ($null -eq $pythonCommand) {
     throw 'Python 3.12 is required. Activate the documented virtual environment first.'
 }
@@ -66,7 +76,6 @@ if ($LASTEXITCODE -ne 0 -or $pythonVersion -notmatch '^3\.12(?:\.|$)') {
     throw "Python 3.12 is required; active Python reported '$pythonVersion'."
 }
 
-$projectRoot = Split-Path $PSScriptRoot -Parent
 $previousPythonPath = [Environment]::GetEnvironmentVariable('PYTHONPATH', 'Process')
 [Environment]::SetEnvironmentVariable('PYTHONPATH', $projectRoot, 'Process')
 
@@ -101,6 +110,8 @@ try {
         foreach ($fileName in @(
             'coverage.json',
             'client-execution.json',
+            'client-stdout.txt',
+            'client-stderr.txt',
             'launcher-outcome.json',
             'shutdown-request.json'
         )) {
@@ -109,6 +120,23 @@ try {
                 Copy-Item -LiteralPath $sourcePath -Destination (Join-Path $controlDirectory $fileName) -Force
             }
         }
+    }
+
+    $clientExecutionPath = Join-Path $controlDirectory 'client-execution.json'
+    if (-not [string]::IsNullOrWhiteSpace($AdapterPath) -and
+        (Test-Path -LiteralPath $clientExecutionPath -PathType Leaf)) {
+        if (-not (Test-Path -LiteralPath $AdapterPath -PathType Leaf)) {
+            throw "Adapter does not exist: $AdapterPath"
+        }
+        Invoke-AnalysisStage -Module 'analysis.agent_runtime' -Arguments @(
+            'reclassify-execution',
+            '--adapter', $AdapterPath,
+            '--schema', (Join-Path $projectRoot 'adapters\schema\adapter.schema.json'),
+            '--source-execution', $clientExecutionPath,
+            '--stdout', (Join-Path $controlDirectory 'client-stdout.txt'),
+            '--stderr', (Join-Path $controlDirectory 'client-stderr.txt'),
+            '--output', $clientExecutionPath
+        )
     }
 
     $coveragePath = Join-Path $controlDirectory 'coverage.json'

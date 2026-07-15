@@ -136,6 +136,10 @@ def build_report(
         "schema_version": REPORT_SCHEMA,
         "capture_status": capture_status,
         "client_version": client_execution.get("normalized_client_version") or client_execution.get("client_version"),
+        "authentication_mode": (
+            client_execution.get("observed_authentication_mode")
+            or client_execution.get("authentication_mode")
+        ),
         "capture_outcome": capture_outcome,
         "output_layout": {
             "output_root": str(output_root),
@@ -264,6 +268,9 @@ def render_markdown(report: dict[str, Any]) -> str:
                 "",
                 f"- Product: `{client.get('product')}`",
                 f"- Client version: `{client.get('client_version')}`",
+                f"- Configured authentication mode: `{client.get('authentication_mode')}`",
+                f"- Observed authentication mode: `{client.get('observed_authentication_mode')}`",
+                f"- Authentication failure reason: `{client.get('authentication_failure_reason')}`",
                 f"- Version command: `{client.get('version_command')}`",
                 f"- Version exit code: `{client.get('version_exit_code')}`",
                 f"- Launcher exit code: `{report['capture_outcome'].get('launcher_exit_code')}`",

@@ -235,6 +235,11 @@ function Assert-FailureArtifacts {
     $failure = Get-Content -LiteralPath (Join-Path $RunDirectory 'startup-failure.json') -Raw | ConvertFrom-Json
     Assert-True ($run.startup_status -eq 'CAPTURE_START_FAILED') 'Failure run did not use CAPTURE_START_FAILED.'
     Assert-True ($run.proxy_started -eq $false) 'Failure run incorrectly recorded proxy_started=true.'
+    if ($ExpectedStage -eq 'mitmdump_executable_resolution') {
+        Assert-True ($run.ca_imported_by_run -eq $false) 'Missing explicit mitmdump path reached CA import.'
+        $journal = @(Get-Content -LiteralPath (Join-Path $RunDirectory 'startup-journal.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
+        Assert-True ($null -eq ($journal | Where-Object { $_.stage -eq 'ca_import' -and $_.event -eq 'started' } | Select-Object -First 1)) 'Missing explicit mitmdump path reached the CA import stage.'
+    }
     Assert-True ($failure.failure_stage -eq $ExpectedStage) "Expected failure stage $ExpectedStage, got $($failure.failure_stage)."
     Assert-True ($failure.cleanup.process_stopped -ne $false) 'Failure cleanup did not stop the started process.'
     Assert-True ($failure.cleanup.ca_removal_succeeded -eq $true) 'Failure cleanup did not complete CA removal handling.'
