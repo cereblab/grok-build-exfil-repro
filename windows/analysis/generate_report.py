@@ -48,6 +48,21 @@ def _assert_no_prohibited_conclusions(report: dict[str, Any]) -> None:
         raise ValueError(f"Report contains prohibited conclusion language: {found}")
 
 
+def _direction_summary(findings: list[dict[str, Any]]) -> dict[str, int]:
+    return {
+        "client_to_server_occurrences": sum(
+            item.get("direction") == "client_to_server" for item in findings
+        ),
+        "server_to_client_occurrences": sum(
+            item.get("direction") == "server_to_client" for item in findings
+        ),
+        "other_or_unknown_occurrences": sum(
+            item.get("direction") not in {"client_to_server", "server_to_client"}
+            for item in findings
+        ),
+    }
+
+
 def build_report(
     run_directory: Path,
     analysis_directory: Path,
@@ -82,6 +97,13 @@ def build_report(
     if capture_outcome:
         capture_status = str(capture_outcome["final_status"])
     canary_findings = classification.get("canary_findings", [])
+    canary_direction_summary = _direction_summary(canary_findings)
+    allowed_file_findings = [
+        item
+        for item in canary_findings
+        if item.get("canary_name") == "allowed_file_first_line_canary"
+    ]
+    allowed_file_direction_summary = _direction_summary(allowed_file_findings)
     http_request_count = int(
         coverage.get("http_request_count", coverage.get("total_request_count", 0)) or 0
     )
@@ -146,7 +168,10 @@ def build_report(
         "decoding_failures": extraction.get("extraction_failures", []),
         "unsupported_encodings": extraction.get("unsupported_encodings", []),
         "processing_limits_reached": extraction.get("processing_limits_reached", []),
+        "canary_inventory_sources": classification.get("canary_inventory_sources", []),
         "canary_findings": canary_findings,
+        "canary_direction_summary": canary_direction_summary,
+        "allowed_file_first_line_summary": allowed_file_direction_summary,
         "canary_summary": (
             f"{len(canary_findings)} exact tested-canary occurrence(s) were detected."
             if canary_findings
@@ -245,6 +270,10 @@ def render_markdown(report: dict[str, Any]) -> str:
                 f"- mitmdump exit code: `{report['capture_outcome'].get('mitmdump_exit_code')}`",
                 f"- Lifecycle status: `{report['capture_outcome'].get('launcher_final_status')}`",
                 f"- Shutdown error classification: `{report['capture_outcome'].get('shutdown_error_classification')}`",
+                f"- Client completion timestamp: `{report['capture_outcome'].get('client_completion_timestamp')}`",
+                f"- Shutdown request timestamp: `{report['capture_outcome'].get('shutdown_request_timestamp')}`",
+                f"- Proxy termination timestamp: `{report['capture_outcome'].get('proxy_termination_timestamp')}`",
+                f"- Listener release timestamp: `{report['capture_outcome'].get('listener_release_timestamp')}`",
                 f"- Model identifier: `{coverage.get('model_identifier_observed') or client.get('model_identifier')}`",
                 f"- Prompt: `{client.get('prompt')}`",
                 f"- Exit code: `{client.get('exit_code')}`",
@@ -262,6 +291,15 @@ def render_markdown(report: dict[str, Any]) -> str:
                 "",
             ]
         )
+        runtime_errors = report["capture_outcome"].get("runtime_error_timeline") or []
+        if runtime_errors:
+            lines.extend(["### Runtime error chronology", ""])
+            for error in runtime_errors:
+                lines.append(
+                    f"- `{error.get('timestamp_utc')}` ({error.get('timing')}): "
+                    f"`{error.get('error_type')}` from `{error.get('source')}`"
+                )
+            lines.append("")
     if report["decoding_operations"]:
         lines.extend(["### Decoding operations", ""])
         for operation in report["decoding_operations"]:
@@ -278,9 +316,28 @@ def render_markdown(report: dict[str, Any]) -> str:
         lines.append("")
 
     lines.extend(["## Canary findings", "", report["canary_summary"], ""])
+    direction_summary = report["canary_direction_summary"]
+    allowed_summary = report["allowed_file_first_line_summary"]
+    lines.extend(
+        [
+            "- Directional occurrence counts: "
+            f"client-to-server={direction_summary['client_to_server_occurrences']}, "
+            f"server-to-client={direction_summary['server_to_client_occurrences']}, "
+            f"other-or-unknown={direction_summary['other_or_unknown_occurrences']}.",
+            "- Allowed-file first-line marker: "
+            f"client-to-server={allowed_summary['client_to_server_occurrences']}, "
+            f"server-to-client={allowed_summary['server_to_client_occurrences']}, "
+            f"other-or-unknown={allowed_summary['other_or_unknown_occurrences']}. "
+            "A client-to-server match establishes only that permitted first-line marker was transmitted outbound; "
+            "it does not establish that the full file or other repository content was transmitted.",
+            "",
+        ]
+    )
     for finding in report["canary_findings"]:
+        direction = finding.get("direction") or "other_or_unknown"
         lines.append(
-            f"- `{finding['canary_name']}` in `{finding['source_artifact']}` at byte offset {finding['byte_offset']} ({finding['layer']})"
+            f"- `{finding['canary_name']}` direction=`{direction}` in `{finding['source_artifact']}` "
+            f"at byte offset {finding['byte_offset']} ({finding['layer']})"
         )
     if report["canary_findings"]:
         lines.append("")

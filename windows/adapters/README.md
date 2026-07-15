@@ -46,9 +46,12 @@ Validated Test A date: 2026-07-14/15 local time.
 
 The official command reference documents `codex exec` as the stable
 noninteractive mode. It documents `--cd`, `--model`, `--ask-for-approval`,
-`--sandbox`, `--json`, and a prompt argument (or `-` for stdin). The Phase 3A
-template uses read-only sandboxing, no interactive approvals, JSONL output, and
-the generated repository as `--cd`.
+`--sandbox`, `--json`, and a prompt argument (or `-` for stdin). The Codex
+template uses the `read-only` policy, `never` approvals, JSONL output, and the
+generated repository as `--cd`. On native Windows it explicitly selects the
+documented `windows.sandbox="unelevated"` fallback. This avoids the
+administrator-approved setup required by the elevated implementation without
+weakening the read-only policy or granting write access.
 
 The official environment-variable reference documents
 `CODEX_CA_CERTIFICATE` and fallback `SSL_CERT_FILE` for HTTPS, login, and

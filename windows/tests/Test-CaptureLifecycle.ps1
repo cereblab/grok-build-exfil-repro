@@ -392,6 +392,11 @@ try {
         Assert-True ($successMetadata.startup_status -eq 'CAPTURE_COMPLETE') 'Controlled fixture did not complete capture lifecycle.'
         Assert-True ($successMetadata.ca_imported_by_run -eq $true) 'Controlled fixture did not record its CA import.'
         Assert-True ($successMetadata.ca_removed_by_run -eq $true) 'Controlled fixture did not record its CA removal.'
+        Assert-True (-not [string]::IsNullOrWhiteSpace([string] $successMetadata.proxy_termination_timestamp_utc)) 'Controlled fixture did not record proxy termination time.'
+        Assert-True (-not [string]::IsNullOrWhiteSpace([string] $successMetadata.listener_release_timestamp_utc)) 'Controlled fixture did not record listener release time.'
+        $successJournal = @(Get-Content -LiteralPath (Join-Path $successRun 'startup-journal.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
+        Assert-True ($null -ne ($successJournal | Where-Object { $_.stage -eq 'proxy_termination' -and $_.event -eq 'completed' } | Select-Object -First 1)) 'Controlled fixture did not journal proxy termination.'
+        Assert-True ($null -ne ($successJournal | Where-Object { $_.stage -eq 'listener_release' -and $_.event -eq 'completed' } | Select-Object -First 1)) 'Controlled fixture did not journal listener release.'
         Assert-True ((Get-RootCertificateMatchCount -Thumbprint $successMetadata.ca_thumbprint) -eq 0) 'Controlled fixture left its CA trusted.'
         Assert-True (Test-Path -LiteralPath (Join-Path $successConfig 'mitmproxy-ca-cert.cer') -PathType Leaf) 'Controlled fixture removed its CER evidence file.'
         Assert-True (Test-Path -LiteralPath (Join-Path $successConfig 'mitmproxy-ca-cert.pem') -PathType Leaf) 'Controlled fixture removed its PEM evidence file.'

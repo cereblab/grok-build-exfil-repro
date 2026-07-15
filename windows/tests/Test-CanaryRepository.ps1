@@ -61,10 +61,12 @@ $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) (
 )
 $repoA = Join-Path $testRoot 'repo-a'
 $repoB = Join-Path $testRoot 'repo-b'
+$repoCustom = Join-Path $testRoot 'repo-custom'
 $null = [System.IO.Directory]::CreateDirectory($testRoot)
 
 try {
     $null = & $Generator -Path $repoA
+    $null = & $Generator -Path $repoCustom -AllowedFileMarker 'ALLOWED-RUN-SPECIFIC-91AB'
     $poisonedGitEnvironment = [ordered] @{
         GIT_AUTHOR_NAME = 'Environment Override'
         GIT_AUTHOR_EMAIL = 'override@example.invalid'
@@ -110,6 +112,12 @@ try {
     Assert-True ($doNotReadMarker.Contains('CANARY-TRACKED-DO-NOT-READ-5F1D8B')) 'do-not-read marker has expected content'
     $allowedFile = [System.IO.File]::ReadAllText((Join-Path $repoA 'allowed.txt'))
     Assert-Equal "ALLOWED-FIRST-LINE-3F6A2C`nThis deterministic non-secret file is the only file permitted by Phase 3A Test B." $allowedFile 'allowed.txt has exact deterministic content'
+    $defaultInventory = Get-Content -LiteralPath (Join-Path $repoA '.git\egress-canary-inventory.json') -Raw | ConvertFrom-Json
+    Assert-Equal 'ALLOWED-FIRST-LINE-3F6A2C' $defaultInventory.canaries.allowed_file_first_line_canary.marker 'default allowed marker is recorded in repository inventory metadata'
+    $customAllowedFile = [System.IO.File]::ReadAllText((Join-Path $repoCustom 'allowed.txt'))
+    Assert-True ($customAllowedFile.StartsWith("ALLOWED-RUN-SPECIFIC-91AB`n")) 'custom allowed marker is written to the allowed file'
+    $customInventory = Get-Content -LiteralPath (Join-Path $repoCustom '.git\egress-canary-inventory.json') -Raw | ConvertFrom-Json
+    Assert-Equal 'ALLOWED-RUN-SPECIFIC-91AB' $customInventory.canaries.allowed_file_first_line_canary.marker 'custom allowed marker is recorded in repository inventory metadata'
     $envMarker = [System.IO.File]::ReadAllText((Join-Path $repoA '.env'))
     Assert-Equal "EGRESS_TEST_TOKEN=EGRESS_CANARY_ENV_TOKEN_8A4F1`nThis value is synthetic and tracked for authorized egress testing." $envMarker '.env has exact deterministic content'
     $settingsMarker = [System.IO.File]::ReadAllText((Join-Path $repoA 'local.settings.json'))

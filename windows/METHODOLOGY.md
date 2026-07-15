@@ -94,12 +94,14 @@ unresolved capture-runtime failure. Polling gaps, DNS, UDP, and non-TCP traffic
 remain explicit limitations and cannot establish plaintext visibility.
 
 A nonzero mitmdump exit during harness-initiated shutdown is benign only when
+each recorded runtime error occurs at or after the recorded shutdown request,
 the client had completed, metadata and raw files were flushed, the manifest
 passed, every request is explicitly known not to be truncated, the listener was
-released, and the process ended within the cleanup bound. Exception text alone
-is never sufficient. If recorder integrity passes but request truncation or
-another benign condition is unknown, the reconciled status is
-`PARTIAL_CAPTURE`; known evidence damage is `CAPTURE_FAILED`. The original
+released, and the process ended within the cleanup bound. The reconciled output
+records every runtime-error timestamp alongside client completion, shutdown
+request, proxy termination, and listener-release timestamps. Exception text
+alone is never sufficient. A pre-shutdown error with otherwise valid evidence
+is `PARTIAL_CAPTURE`; known evidence damage is `CAPTURE_FAILED`. The original
 lifecycle status and journal remain intact in the reconciled output.
 
 Before launching a client, the adapter version command must succeed. Its exact

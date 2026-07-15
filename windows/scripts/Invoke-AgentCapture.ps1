@@ -587,10 +587,14 @@ if ($LASTEXITCODE -ne 0) {
     throw "Evidence analysis failed with exit code $LASTEXITCODE."
 }
 
+$finalOutcome = Get-Content -LiteralPath (Join-Path $controlDirectory 'capture-outcome.json') -Raw |
+    ConvertFrom-Json
+$finalStatus = [string] $finalOutcome.final_status
+
 [pscustomobject] @{
     RunId = $reservation.run_id
     TestId = $TestId
-    CaptureStatus = $coverage.capture_status
+    CaptureStatus = $finalStatus
     ClientRuntimeExitCode = $clientRuntimeExitCode
     ProxyEndedCleanly = $proxyEndedCleanly
     CanaryRepository = $canaryRepository
@@ -599,4 +603,12 @@ if ($LASTEXITCODE -ne 0) {
     ControlDirectory = $controlDirectory
     AnalysisDirectory = $analysisDirectory
     ReportDirectory = $reportDirectory
+}
+
+# Capture infrastructure completing does not make a failed client run successful.
+# CAPTURE_VALIDATED is the only reconciled status that represents a successful
+# end-to-end invocation.
+if ($finalStatus -ne 'CAPTURE_VALIDATED') {
+    Write-Error "Agent capture reconciled to $finalStatus. See $(Join-Path $reportDirectory 'report.md')."
+    exit 1
 }

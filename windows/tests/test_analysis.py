@@ -29,6 +29,7 @@ from analysis.extract_payloads import extract_run
 from analysis.generate_report import (
     MISSING_CANARY_LANGUAGE,
     PROHIBITED_CONCLUSIONS,
+    build_report,
     generate_reports,
     render_markdown,
 )
@@ -380,6 +381,97 @@ class ClassificationTests(unittest.TestCase):
             self.assertTrue(
                 all(not item["structurally_validated"] for item in result["git_candidates"])
             )
+
+    def test_run_specific_allowed_marker_and_websocket_direction_are_reported(self) -> None:
+        marker = b"ALLOWED-RUN-SPECIFIC-91AB"
+        with tempfile.TemporaryDirectory(prefix="phase3b-allowed-marker-") as temporary:
+            root = Path(temporary)
+            repository = root / "canary-repository"
+            metadata_path = repository / ".git" / "egress-canary-inventory.json"
+            metadata_path.parent.mkdir(parents=True)
+            metadata_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "egress-canary-inventory/v1",
+                        "canaries": {
+                            "allowed_file_first_line_canary": {
+                                "marker": marker.decode("ascii"),
+                                "source_file": "allowed.txt",
+                                "tracked_ref": "HEAD",
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            run = _create_run(root, [{"data": b"ordinary payload"}])
+            websocket_records = []
+            for sequence, direction in enumerate(
+                ("client_to_server", "server_to_client"), 1
+            ):
+                payload = marker + b" websocket payload"
+                digest = hashlib.sha256(payload).hexdigest()
+                relative = f"raw/websocket/{sequence:08d}-{digest}.bin"
+                (run / relative).write_bytes(payload)
+                websocket_records.append(
+                    {
+                        "raw_payload_file": relative,
+                        "direction": direction,
+                        "message_sequence_number": sequence,
+                        "host": "example.invalid",
+                        "path": "/responses",
+                    }
+                )
+            (run / "websockets.jsonl").write_text(
+                "".join(json.dumps(item) + "\n" for item in websocket_records),
+                encoding="utf-8",
+            )
+            derived = root / "derived"
+            derived.mkdir()
+            result = classify_evidence(
+                run,
+                derived,
+                canary_repository=repository,
+            )
+            findings = [
+                item
+                for item in result["canary_findings"]
+                if item["canary_name"] == "allowed_file_first_line_canary"
+            ]
+            self.assertEqual(2, len(findings))
+            self.assertEqual(
+                {"client_to_server", "server_to_client"},
+                {item["direction"] for item in findings},
+            )
+            self.assertEqual(
+                "repository_inventory_metadata",
+                result["canary_inventory_sources"][0]["source"],
+            )
+            write_json_atomic(
+                derived / "git-validation.json",
+                {
+                    "schema_version": GIT_VALIDATION_SCHEMA,
+                    "validated_candidates": [],
+                    "git_bundle_validated": False,
+                    "git_pack_validated": False,
+                    "partial_git_object_set_recovered": False,
+                    "complete_expected_object_set_recovered": False,
+                    "expected_refs_recovered": False,
+                    "full_repository_reconstructed": False,
+                },
+            )
+            report = build_report(run, derived)
+            self.assertEqual(
+                1,
+                report["allowed_file_first_line_summary"]["client_to_server_occurrences"],
+            )
+            self.assertEqual(
+                1,
+                report["allowed_file_first_line_summary"]["server_to_client_occurrences"],
+            )
+            markdown = render_markdown(report)
+            self.assertIn("client-to-server=1, server-to-client=1", markdown)
+            self.assertIn("does not establish that the full file", markdown)
 
 
 class GitValidationTests(unittest.TestCase):

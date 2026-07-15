@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 from pathlib import Path
 from typing import Any, Iterable
 
 from .models import CANARIES, CLASSIFICATION_SCHEMA, sha256_bytes, write_json_atomic
+
+
+ALLOWED_FILE_CANARY = "allowed_file_first_line_canary"
+INVENTORY_SCHEMA = "egress-canary-inventory/v1"
 
 
 BUNDLE_SIGNATURES = {
@@ -31,14 +36,83 @@ def _all_offsets(data: bytes, marker: bytes) -> list[int]:
         start = offset + 1
 
 
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _load_allowed_file_marker(canary_repository: Path) -> tuple[bytes, dict[str, Any]] | None:
+    """Load the allowed-file marker from generator metadata or the tracked HEAD blob."""
+
+    metadata_path = canary_repository / ".git" / "egress-canary-inventory.json"
+    if metadata_path.is_file():
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        entry = metadata.get("canaries", {}).get(ALLOWED_FILE_CANARY, {})
+        marker = entry.get("marker")
+        if metadata.get("schema_version") == INVENTORY_SCHEMA and isinstance(marker, str) and marker:
+            return marker.encode("utf-8"), {
+                "canary_name": ALLOWED_FILE_CANARY,
+                "source": "repository_inventory_metadata",
+                "source_path": ".git/egress-canary-inventory.json",
+                "source_file": entry.get("source_file", "allowed.txt"),
+                "tracked_ref": entry.get("tracked_ref", "HEAD"),
+                "marker_sha256": sha256_bytes(marker.encode("utf-8")),
+            }
+
+    completed = subprocess.run(
+        ["git", "-C", str(canary_repository), "show", "HEAD:allowed.txt"],
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return None
+    first_line = completed.stdout.splitlines()[0] if completed.stdout.splitlines() else b""
+    if not first_line:
+        return None
+    return first_line, {
+        "canary_name": ALLOWED_FILE_CANARY,
+        "source": "repository_head_allowed_file_fallback",
+        "source_path": "HEAD:allowed.txt",
+        "source_file": "allowed.txt",
+        "tracked_ref": "HEAD",
+        "marker_sha256": sha256_bytes(first_line),
+    }
+
+
+def _load_canary_inventory(
+    canary_repository: Path | None,
+) -> tuple[dict[str, bytes], list[dict[str, Any]]]:
+    inventory = dict(CANARIES)
+    sources: list[dict[str, Any]] = []
+    if canary_repository is not None:
+        allowed = _load_allowed_file_marker(canary_repository)
+        if allowed is not None:
+            marker, source = allowed
+            inventory[ALLOWED_FILE_CANARY] = marker
+            sources.append(source)
+    return inventory, sources
+
+
+def _websocket_metadata(run_directory: Path) -> dict[str, dict[str, Any]]:
+    records: dict[str, dict[str, Any]] = {}
+    for record in _read_jsonl(run_directory / "websockets.jsonl"):
+        raw_file = record.get("raw_payload_file")
+        if isinstance(raw_file, str):
+            records[raw_file] = record
+    return records
+
+
 def _load_artifacts(
     run_directory: Path, derived_directory: Path
 ) -> list[dict[str, Any]]:
     artifacts: list[dict[str, Any]] = []
     raw_root = run_directory / "raw"
+    websocket_records = _websocket_metadata(run_directory)
     if raw_root.is_dir():
         for path in sorted(item for item in raw_root.rglob("*") if item.is_file()):
             relative = path.relative_to(run_directory).as_posix()
+            websocket_record = websocket_records.get(relative, {})
             artifacts.append(
                 {
                     "path": relative,
@@ -46,6 +120,11 @@ def _load_artifacts(
                     "layer": "raw",
                     "source_raw_file": relative,
                     "extraction_path": [relative],
+                    "transport": "websocket" if relative.startswith("raw/websocket/") else "http",
+                    "direction": websocket_record.get("direction"),
+                    "message_sequence_number": websocket_record.get("message_sequence_number"),
+                    "host": websocket_record.get("host"),
+                    "websocket_path": websocket_record.get("path"),
                 }
             )
 
@@ -88,18 +167,26 @@ def _load_artifacts(
                 "layer": "derived",
                 "source_raw_file": source_raw,
                 "extraction_path": extraction_chain(output_file),
+                "transport": "derived",
+                "direction": None,
             }
         )
     return artifacts
 
 
 def classify_evidence(
-    run_directory: Path, derived_directory: Path
+    run_directory: Path,
+    derived_directory: Path,
+    *,
+    canary_repository: Path | None = None,
 ) -> dict[str, Any]:
     run_directory = run_directory.resolve()
     derived_directory = derived_directory.resolve()
+    canary_repository = canary_repository.resolve() if canary_repository else None
+    canary_inventory, inventory_sources = _load_canary_inventory(canary_repository)
     result: dict[str, Any] = {
         "schema_version": CLASSIFICATION_SCHEMA,
+        "canary_inventory_sources": inventory_sources,
         "canary_findings": [],
         "artifact_signatures": [],
         "git_candidates": [],
@@ -115,7 +202,7 @@ def classify_evidence(
         if not path.is_file():
             continue
         data = path.read_bytes()
-        for canary_name, canary in CANARIES.items():
+        for canary_name, canary in canary_inventory.items():
             for offset in _all_offsets(data, canary):
                 context = data[max(0, offset - 32) : min(len(data), offset + len(canary) + 32)]
                 result["canary_findings"].append(
@@ -125,6 +212,11 @@ def classify_evidence(
                         "byte_offset": offset,
                         "extraction_path": artifact["extraction_path"],
                         "layer": artifact["layer"],
+                        "transport": artifact.get("transport"),
+                        "direction": artifact.get("direction"),
+                        "message_sequence_number": artifact.get("message_sequence_number"),
+                        "host": artifact.get("host"),
+                        "path": artifact.get("websocket_path"),
                         "surrounding_context_sha256": sha256_bytes(context),
                     }
                 )
@@ -224,8 +316,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("run_directory", type=Path)
     parser.add_argument("derived_directory", type=Path)
+    parser.add_argument("--canary-repository", type=Path)
     args = parser.parse_args()
-    result = classify_evidence(args.run_directory, args.derived_directory)
+    result = classify_evidence(
+        args.run_directory,
+        args.derived_directory,
+        canary_repository=args.canary_repository,
+    )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 

@@ -22,7 +22,10 @@
     "derived_artifacts_created",
     "decoding_operations",
     "decoding_failures",
+    "canary_inventory_sources",
     "canary_findings",
+    "canary_direction_summary",
+    "allowed_file_first_line_summary",
     "git_candidate_findings",
     "git_validation_results",
     "limitations",
@@ -54,6 +57,12 @@
         "shutdown_error_observed": {"type": "boolean"},
         "shutdown_error_classification": {"type": "string"},
         "capture_integrity_affected": {"type": ["boolean", "null"]},
+        "client_completion_timestamp": {"type": ["string", "null"]},
+        "shutdown_request_timestamp": {"type": ["string", "null"]},
+        "proxy_termination_timestamp": {"type": ["string", "null"]},
+        "listener_release_timestamp": {"type": ["string", "null"]},
+        "runtime_error_timeline": {"type": "array"},
+        "runtime_error_timing_summary": {"type": "object"},
         "final_status_reason": {"type": "string"}
       }
     },
@@ -90,7 +99,36 @@
     "decoding_failures": {"type": "array"},
     "unsupported_encodings": {"type": "array"},
     "processing_limits_reached": {"type": "array"},
+    "canary_inventory_sources": {"type": "array"},
     "canary_findings": {"type": "array"},
+    "canary_direction_summary": {
+      "type": "object",
+      "required": [
+        "client_to_server_occurrences",
+        "server_to_client_occurrences",
+        "other_or_unknown_occurrences"
+      ],
+      "properties": {
+        "client_to_server_occurrences": {"type": "integer", "minimum": 0},
+        "server_to_client_occurrences": {"type": "integer", "minimum": 0},
+        "other_or_unknown_occurrences": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "allowed_file_first_line_summary": {
+      "type": "object",
+      "required": [
+        "client_to_server_occurrences",
+        "server_to_client_occurrences",
+        "other_or_unknown_occurrences"
+      ],
+      "properties": {
+        "client_to_server_occurrences": {"type": "integer", "minimum": 0},
+        "server_to_client_occurrences": {"type": "integer", "minimum": 0},
+        "other_or_unknown_occurrences": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
     "canary_summary": {"type": "string"},
     "git_candidate_findings": {"type": "array"},
     "git_validation_results": {"type": "object"},

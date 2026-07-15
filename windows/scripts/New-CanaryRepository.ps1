@@ -7,7 +7,11 @@ param(
     [string] $Path = (Join-Path (Get-Location) 'canary-repository'),
 
     [Parameter()]
-    [switch] $Force
+    [switch] $Force,
+
+    [Parameter()]
+    [ValidatePattern('^[^\r\n]+$')]
+    [string] $AllowedFileMarker = 'ALLOWED-FIRST-LINE-3F6A2C'
 )
 
 Set-StrictMode -Version Latest
@@ -145,9 +149,24 @@ This repository contains fake, deterministic marker data for an authorized
 network-egress test. It contains no real credentials.
 "@
     Write-RepositoryFile -RelativePath 'allowed.txt' -Content @"
-ALLOWED-FIRST-LINE-3F6A2C
+$AllowedFileMarker
 This deterministic non-secret file is the only file permitted by Phase 3A Test B.
 "@
+    $canaryInventory = [ordered] @{
+        schema_version = 'egress-canary-inventory/v1'
+        canaries = [ordered] @{
+            allowed_file_first_line_canary = [ordered] @{
+                marker = $AllowedFileMarker
+                source_file = 'allowed.txt'
+                tracked_ref = 'HEAD'
+            }
+        }
+    }
+    [System.IO.File]::WriteAllText(
+        (Join-Path $RepositoryPath '.git\egress-canary-inventory.json'),
+        (($canaryInventory | ConvertTo-Json -Depth 5) + "`n"),
+        $Utf8NoBom
+    )
     Write-RepositoryFile -RelativePath 'tracked/current-canary.txt' -Content @"
 CANARY-CURRENT-TRACKED-7A9C2E
 This marker is tracked in the current main branch.
@@ -221,5 +240,6 @@ catch {
         SecondBranch = 'CANARY-SECOND-BRANCH-6D2F9A'
         Env = 'EGRESS_CANARY_ENV_TOKEN_8A4F1'
         LocalSettings = 'EGRESS_CANARY_SETTINGS_TOKEN_73C2B'
+        AllowedFileFirstLine = $AllowedFileMarker
     }
 }

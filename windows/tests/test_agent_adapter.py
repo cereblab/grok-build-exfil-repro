@@ -31,7 +31,10 @@ from analysis.models import (
 )
 from analysis.output_layout import prepare_output_layout
 from analysis.validate_capture_coverage import calculate_capture_status
-from analysis.reconcile_capture_outcome import calculate_final_outcome
+from analysis.reconcile_capture_outcome import (
+    calculate_final_outcome,
+    process_exit_code_for_final_status,
+)
 
 
 ADAPTER_PATH = WINDOWS_ROOT / "adapters" / "codex.json"
@@ -142,6 +145,9 @@ class AdapterValidationTests(unittest.TestCase):
             str(Path(adapter["executable"]).absolute()), prepared["executable"]
         )
         self.assertNotIn("WindowsApps", str(prepared["executable"]))
+        self.assertEqual("never", adapter["approval_mode"])
+        self.assertEqual("read-only", adapter["sandbox_mode"])
+        self.assertIn('windows.sandbox="unelevated"', prepared["arguments"])
 
     def test_placeholder_substitution_and_preparation(self) -> None:
         self.assertEqual("port=8080", substitute("port={proxy_port}", {"proxy_port": 8080}))
@@ -371,6 +377,36 @@ class ClientRuntimeTests(unittest.TestCase):
 
 
 class CoverageAndReportTests(unittest.TestCase):
+    def test_reconciled_status_controls_top_level_exit_code(self) -> None:
+        self.assertEqual(0, process_exit_code_for_final_status("CAPTURE_VALIDATED"))
+        for status in (
+            "PARTIAL_CAPTURE",
+            "TLS_INTERCEPTION_FAILED",
+            "DIRECT_BYPASS_DETECTED",
+            "NO_AGENT_TRAFFIC_OBSERVED",
+            "CAPTURE_START_FAILED",
+            "CLIENT_EXECUTION_FAILED",
+            "CAPTURE_FAILED",
+        ):
+            with self.subTest(status=status):
+                self.assertNotEqual(0, process_exit_code_for_final_status(status))
+
+    def test_runner_uses_authoritative_status_for_process_exit(self) -> None:
+        runner = (WINDOWS_ROOT / "scripts" / "Invoke-AgentCapture.ps1").read_text(
+            encoding="utf-8-sig"
+        )
+        self.assertIn("$finalOutcome.final_status", runner)
+        self.assertIn("if ($finalStatus -ne 'CAPTURE_VALIDATED')", runner)
+        self.assertIn("exit 1", runner)
+
+    def test_offline_reanalysis_reconciles_source_control_before_reporting(self) -> None:
+        script = (WINDOWS_ROOT / "scripts" / "Invoke-EvidenceAnalysis.ps1").read_text(
+            encoding="utf-8-sig"
+        )
+        self.assertIn("'launcher-outcome.json'", script)
+        self.assertIn("'shutdown-request.json'", script)
+        self.assertIn("analysis.reconcile_capture_outcome", script)
+
     def _status(self, **overrides: object) -> str:
         values: dict[str, object] = {
             "mitmproxy_started": True,
@@ -418,6 +454,11 @@ class CoverageAndReportTests(unittest.TestCase):
             "shutdown_initiated_by_harness": True,
             "listener_released": True,
             "process_terminated_within_cleanup_bound": True,
+            "runtime_errors": [],
+            "client_completion_timestamp": "2024-01-01T00:00:00Z",
+            "shutdown_request_timestamp": "2024-01-01T00:00:01Z",
+            "proxy_termination_timestamp": "2024-01-01T00:00:02Z",
+            "listener_release_timestamp": "2024-01-01T00:00:03Z",
             "lifecycle_history": [{"stage": "startup", "event": "completed"}],
         }
         values.update(overrides)
@@ -437,6 +478,7 @@ class CoverageAndReportTests(unittest.TestCase):
             mitmdump_exit_code=1,
             launcher_final_status="CAPTURE_FAILED",
             capture_runtime_failure=True,
+            runtime_errors=[{"timestamp_utc": "2024-01-01T00:00:01Z", "timing": "AT_OR_AFTER_SHUTDOWN_REQUEST"}],
         )
         self.assertEqual("CAPTURE_VALIDATED", benign["final_status"])
         self.assertEqual("BENIGN_CONTROLLED_SHUTDOWN", benign["shutdown_error_classification"])
@@ -459,6 +501,57 @@ class CoverageAndReportTests(unittest.TestCase):
             "PARTIAL_CAPTURE",
             self._status(request_count=0, process_monitoring_complete=False),
         )
+
+    def test_runtime_error_timing_controls_shutdown_classification(self) -> None:
+        before = self._final_outcome(
+            launcher_exit_code=1,
+            mitmdump_exit_code=1,
+            capture_runtime_failure=True,
+            runtime_errors=[{"timestamp_utc": "2024-01-01T00:00:00.999Z", "timing": "BEFORE_SHUTDOWN_REQUEST"}],
+        )
+        self.assertEqual("PARTIAL_CAPTURE", before["final_status"])
+        self.assertEqual("PRE_SHUTDOWN_RUNTIME_ERROR", before["shutdown_error_classification"])
+
+        exact = self._final_outcome(
+            launcher_exit_code=1,
+            mitmdump_exit_code=1,
+            capture_runtime_failure=True,
+            runtime_errors=[{"timestamp_utc": "2024-01-01T00:00:01Z", "timing": "AT_OR_AFTER_SHUTDOWN_REQUEST"}],
+        )
+        self.assertEqual("CAPTURE_VALIDATED", exact["final_status"])
+        self.assertEqual("BENIGN_CONTROLLED_SHUTDOWN", exact["shutdown_error_classification"])
+
+        after = self._final_outcome(
+            launcher_exit_code=1,
+            mitmdump_exit_code=1,
+            capture_runtime_failure=True,
+            runtime_errors=[{"timestamp_utc": "2024-01-01T00:00:02Z", "timing": "AT_OR_AFTER_SHUTDOWN_REQUEST"}],
+        )
+        self.assertEqual("CAPTURE_VALIDATED", after["final_status"])
+
+        spanning = self._final_outcome(
+            launcher_exit_code=1,
+            mitmdump_exit_code=1,
+            capture_runtime_failure=True,
+            runtime_errors=[
+                {"timing": "BEFORE_SHUTDOWN_REQUEST"},
+                {"timing": "AT_OR_AFTER_SHUTDOWN_REQUEST"},
+            ],
+        )
+        self.assertEqual("PARTIAL_CAPTURE", spanning["final_status"])
+        self.assertEqual(1, spanning["runtime_error_timing_summary"]["before_shutdown_request"])
+        self.assertEqual(1, spanning["runtime_error_timing_summary"]["at_or_after_shutdown_request"])
+
+    def test_runtime_error_with_established_truncation_fails_capture(self) -> None:
+        outcome = self._final_outcome(
+            launcher_exit_code=1,
+            mitmdump_exit_code=1,
+            capture_runtime_failure=True,
+            runtime_errors=[{"timing": "BEFORE_SHUTDOWN_REQUEST"}],
+            no_request_truncation=False,
+        )
+        self.assertEqual("CAPTURE_FAILED", outcome["final_status"])
+        self.assertEqual("EVIDENCE_THREATENING_FAILURE", outcome["shutdown_error_classification"])
 
     def test_direct_bypass_takes_capture_specific_status(self) -> None:
         self.assertEqual(

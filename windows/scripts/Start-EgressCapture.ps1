@@ -1061,6 +1061,14 @@ catch {
         available_for_bind = Test-LoopbackPortAvailable -Port $ListenPort
     }
     $certificateStateAtFailure = Get-CertificateState -CerPath $caCerPath -KnownThumbprint $caThumbprint
+    if ($failureStage -eq 'capture_runtime') {
+        Write-StartupJournal -Stage 'runtime_error' -Event 'observed' -Details ([ordered] @{
+            error_timestamp_utc = [DateTimeOffset]::UtcNow.ToString('o')
+            exception_type = $_.Exception.GetType().FullName
+            message = $_.Exception.Message
+            process_exit_code = $mitmdumpExitCodeAtFailure
+        })
+    }
     Write-StartupJournal -Stage $failureStage -Event 'failed' -Details ([ordered] @{
         exception_type = $_.Exception.GetType().FullName
         message = $_.Exception.Message
@@ -1095,6 +1103,13 @@ finally {
         $cleanupResult.process_stopped = $captureLoggedProcess.Process.HasExited
         if ($captureLoggedProcess.Process.HasExited) {
             $runMetadata.mitmdump_exit_code = $captureLoggedProcess.Process.ExitCode
+            $runMetadata.proxy_termination_timestamp_utc = [DateTimeOffset]::UtcNow.ToString('o')
+            Write-StartupJournal -Stage 'proxy_termination' -Event 'completed' -Details ([ordered] @{
+                termination_timestamp_utc = $runMetadata.proxy_termination_timestamp_utc
+                exit_code = $runMetadata.mitmdump_exit_code
+                shutdown_initiated_by_launcher = $cleanupResult.graceful_stop_requested
+                forced_termination = $cleanupResult.forced_termination
+            })
         }
         $ioResult = @(Complete-LoggedProcessIo -LoggedProcess $captureLoggedProcess)[-1]
         $captureLoggedProcess.Process.Dispose()
@@ -1107,6 +1122,11 @@ finally {
         Start-Sleep -Milliseconds 200
     }
     $cleanupResult.port_released = -not (Test-LoopbackPortListening -Port $ListenPort)
+    $runMetadata.listener_release_timestamp_utc = [DateTimeOffset]::UtcNow.ToString('o')
+    Write-StartupJournal -Stage 'listener_release' -Event 'completed' -Details ([ordered] @{
+        listener_release_timestamp_utc = $runMetadata.listener_release_timestamp_utc
+        port_released = $cleanupResult.port_released
+    })
     Write-StartupJournal -Stage 'shutdown' -Event 'completed' -Details $cleanupResult
 
     [Environment]::SetEnvironmentVariable('EGRESS_CAPTURE_DIR', $oldCaptureDirectory, 'Process')

@@ -15,6 +15,9 @@ param(
     [string] $ExpectedCanaryRepository,
 
     [Parameter()]
+    [string] $SourceControlDirectory,
+
+    [Parameter()]
     [ValidateRange(1, 100)]
     [int] $MaximumExtractionDepth = 6,
 
@@ -91,6 +94,33 @@ try {
     $analysisDirectory = [string] $layout.analysis_directory
     $controlDirectory = [string] $layout.control_directory
     $reportDirectory = [string] $layout.report_directory
+    if (-not [string]::IsNullOrWhiteSpace($SourceControlDirectory)) {
+        if (-not (Test-Path -LiteralPath $SourceControlDirectory -PathType Container)) {
+            throw "Source control directory does not exist: $SourceControlDirectory"
+        }
+        foreach ($fileName in @(
+            'coverage.json',
+            'client-execution.json',
+            'launcher-outcome.json',
+            'shutdown-request.json'
+        )) {
+            $sourcePath = Join-Path $SourceControlDirectory $fileName
+            if (Test-Path -LiteralPath $sourcePath -PathType Leaf) {
+                Copy-Item -LiteralPath $sourcePath -Destination (Join-Path $controlDirectory $fileName) -Force
+            }
+        }
+    }
+
+    $coveragePath = Join-Path $controlDirectory 'coverage.json'
+    if ((Test-Path -LiteralPath $coveragePath -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $controlDirectory 'client-execution.json') -PathType Leaf)) {
+        Invoke-AnalysisStage -Module 'analysis.reconcile_capture_outcome' -Arguments @(
+            $RunDirectory,
+            $controlDirectory,
+            $controlDirectory,
+            $coveragePath
+        )
+    }
 
     $extractionArguments = @(
         $RunDirectory,
@@ -105,7 +135,8 @@ try {
     )
     Invoke-AnalysisStage -Module 'analysis.extract_payloads' -Arguments $extractionArguments
     Invoke-AnalysisStage -Module 'analysis.classify_payloads' -Arguments @(
-        $RunDirectory, $analysisDirectory
+        $RunDirectory, $analysisDirectory,
+        '--canary-repository', $ExpectedCanaryRepository
     )
     Invoke-AnalysisStage -Module 'analysis.validate_git_artifacts' -Arguments @(
         $RunDirectory, $analysisDirectory, $ExpectedCanaryRepository

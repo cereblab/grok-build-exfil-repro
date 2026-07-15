@@ -10,6 +10,8 @@
   "noninteractive_command_template": [
     "--ask-for-approval",
     "never",
+    "-c",
+    "windows.sandbox=\"unelevated\"",
     "exec",
     "--cd",
     "{working_directory}",
@@ -41,6 +43,7 @@
   "notes": [
     "Expected vendor hosts are reporting hints and do not determine capture success.",
     "The model is not forced; record the model from observable client output or captured evidence when available.",
+    "The command keeps the read-only filesystem policy and never approval mode while selecting Codex's documented unelevated Windows sandbox fallback; this permits reads but does not grant writes.",
     "CODEX_CA_CERTIFICATE and SSL_CERT_FILE are documented Codex trust-bundle variables. Proxy-variable behavior must be established empirically."
   ],
   "limitations": [

@@ -136,6 +136,15 @@ what an unobserved encoding, connection, or evidence layer might contain. Each
 future preview must be separately reviewed and explicitly approved before any
 live traffic occurs.
 
+For native Windows Test B runs, the adapter combines `--sandbox read-only` and
+`--ask-for-approval never` with the documented
+`-c windows.sandbox="unelevated"` implementation override. The prior elevated
+implementation attempted to launch its administrator-approved setup helper;
+Windows canceled that launch with `ShellExecuteExW` error 1223. The unelevated
+fallback uses the same read-only filesystem policy, so the requested read is
+available while repository writes remain prohibited. Verify both properties
+with a local sandbox fixture before reserving a replacement live gate.
+
 ## Routing and process attribution
 
 The adapter supplies these child-process-only values, substituting the reserved
