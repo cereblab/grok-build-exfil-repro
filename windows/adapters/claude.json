@@ -1,0 +1,59 @@
+{
+  "schema_version": "egress-adapter/v1",
+  "product_name": "Claude Code",
+  "vendor": "Anthropic",
+  "client_surface": "CLI",
+  "executable": "C:\\Users\\jande\\.local\\bin\\claude.exe",
+  "version_command": ["--version"],
+  "noninteractive_command_template": [
+    "--safe-mode",
+    "--strict-mcp-config",
+    "--tools=Read",
+    "--disable-slash-commands",
+    "--no-chrome",
+    "--no-session-persistence",
+    "--permission-mode", "plan",
+    "--output-format", "json",
+    "--add-dir", "{working_directory}",
+    "-p", "{prompt}"
+  ],
+  "environment_variables": {
+    "HTTP_PROXY": "http://127.0.0.1:{proxy_port}",
+    "HTTPS_PROXY": "http://127.0.0.1:{proxy_port}",
+    "NO_PROXY": "127.0.0.1,localhost",
+    "NODE_EXTRA_CA_CERTS": "{ca_certificate}",
+    "DISABLE_AUTOUPDATER": "1",
+    "DISABLE_TELEMETRY": "1",
+    "DISABLE_ERROR_REPORTING": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "CLAUDE_CODE_SKIP_PROMPT_HISTORY": "1",
+    "ENABLE_CLAUDEAI_MCP_SERVERS": "false",
+    "CLAUDE_CODE_AUTO_CONNECT_IDE": "false"
+  },
+  "timeout_seconds": 300,
+  "expected_vendor_hosts": [
+    "api.anthropic.com",
+    "claude.ai",
+    "platform.claude.com"
+  ],
+  "authentication_mode": "First-party claude.ai authentication using the persisted user session; credentials were not inspected or exported",
+  "authentication_failure_patterns": [
+    "(?i)not\\s+logged\\s+in",
+    "(?i)(?:/login|claude\\s+auth\\s+login)"
+  ],
+  "model_identifier": null,
+  "approval_mode": "plan with only the built-in Read tool enabled",
+  "sandbox_mode": "No Windows sandbox is claimed; the tool surface is restricted to Read and customizations are disabled by --safe-mode",
+  "notes": [
+    "Anthropic's official native installer installed Claude Code 2.1.210 at the explicit user-scope executable path.",
+    "Local help verified --safe-mode, --strict-mcp-config, --tools, --permission-mode plan, --no-session-persistence, --output-format json, --add-dir, and -p.",
+    "The validated Test A gate disabled all built-in tools. Tests B and C enable only Read without enabling discovery, shell, or write tools.",
+    "Anthropic documents HTTP_PROXY, HTTPS_PROXY, NO_PROXY, and NODE_EXTRA_CA_CERTS; interception and CA trust were validated for the recorded Test A, Test B, and Test C runs and remain run-specific."
+  ],
+  "limitations": [
+    "Successful authenticated Test A, Test B, and Test C executions established the persisted first-party session without inspecting account details or credential material.",
+    "Claude Code documentation states that sandboxing is not supported on native Windows, so no OS sandbox guarantee is claimed.",
+    "Proxy routing, certificate trust, expected hosts, and direct-bypass behavior must be validated independently for each approved live run.",
+    "The recorded Test A, Test B, and Test C results apply only to their preserved commands, prompts, environments, and evidence."
+  ]
+}

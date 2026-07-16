@@ -1,0 +1,60 @@
+{
+  "schema_version": "egress-adapter/v1",
+  "product_name": "Gemini CLI",
+  "vendor": "Google",
+  "client_surface": "CLI",
+  "executable": "C:\\Users\\jande\\AppData\\Roaming\\npm\\gemini.cmd",
+  "version_command": ["--version"],
+  "noninteractive_command_template": [
+    "--approval-mode", "plan",
+    "--skip-trust",
+    "--output-format", "json",
+    "--include-directories", "{working_directory}",
+    "--prompt", "{prompt}"
+  ],
+  "environment_variables": {
+    "HTTP_PROXY": "http://127.0.0.1:{proxy_port}",
+    "HTTPS_PROXY": "http://127.0.0.1:{proxy_port}",
+    "NODE_EXTRA_CA_CERTS": "{ca_certificate}"
+  },
+  "timeout_seconds": 300,
+  "expected_vendor_hosts": [],
+  "authentication_mode": "Gemini CLI 0.50.0, API-key mode",
+  "inherited_secret_environment_variables": [
+    "GEMINI_API_KEY"
+  ],
+  "authentication_failure_patterns": [
+    "(?i)please\\s+set\\s+an\\s+auth\\s+method",
+    "(?i)error\\s+authenticating",
+    "(?i)IneligibleTierError",
+    "(?i)UNSUPPORTED_CLIENT"
+  ],
+  "authentication_failure_classifications": [
+    {
+      "pattern": "(?i)IneligibleTierError|UNSUPPORTED_CLIENT",
+      "reason": "UNSUPPORTED_CLIENT",
+      "observed_authentication_mode": "cached Google sign-in / Gemini Code Assist individual tier"
+    }
+  ],
+  "authentication_selection": {
+    "settings_file": "~/.gemini/settings.json",
+    "json_path": ["security", "auth", "selectedType"],
+    "expected_value": "gemini-api-key"
+  },
+  "model_identifier": null,
+  "approval_mode": "--approval-mode plan used for the approved A-C runs; no auto-edit or yolo mode enabled",
+  "sandbox_mode": "local --help verified --sandbox; it is intentionally not enabled because native Windows provider behavior and its effect on proxy routing are unverified",
+  "notes": [
+    "Gemini CLI 0.50.0 was installed from the official @google/gemini-cli package at the user-scoped npm prefix. The local executable and --version output were verified without submitting a prompt.",
+    "Local --help accepts --prompt, --output-format json, --approval-mode plan, --skip-trust, and --include-directories. The template keeps plan mode and omits --sandbox and yolo/auto-edit modes.",
+    "HTTP_PROXY and HTTPS_PROXY plus NODE_EXTRA_CA_CERTS produced decrypted traffic in the approved A-C runs; attribution and monitoring conclusions remain run-specific.",
+    "The generic runner passes the configured user-scope API key directly to the child environment without serializing its value into the adapter, safety gate, command, logs, or reports.",
+    "The runner verifies that the persisted Gemini selector is gemini-api-key before preview and again before live execution."
+  ],
+  "limitations": [
+    "The earlier unauthenticated Test A exited 41 before vendor traffic and remains a separate preserved result.",
+    "The first API-key-labeled Test A reused cached Google sign-in, reached an unsupported individual Code Assist path, and is preserved as a separate failed-authentication result rather than an API-key-mode result.",
+    "Successful approved A-C client executions established API-key-mode operation for those preserved runs without inspecting or recording the key value.",
+    "An empty expected_vendor_hosts list deliberately avoids treating unvalidated host guesses as capture expectations."
+  ]
+}

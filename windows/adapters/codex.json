@@ -1,0 +1,54 @@
+{
+  "schema_version": "egress-adapter/v1",
+  "product_name": "OpenAI Codex CLI",
+  "vendor": "OpenAI",
+  "client_surface": "CLI",
+  "executable": "C:\\Users\\jande\\AppData\\Local\\Programs\\OpenAI\\Codex\\bin\\codex.exe",
+  "version_command": [
+    "--version"
+  ],
+  "noninteractive_command_template": [
+    "--ask-for-approval",
+    "never",
+    "-c",
+    "windows.sandbox=\"unelevated\"",
+    "exec",
+    "--cd",
+    "{working_directory}",
+    "--sandbox",
+    "read-only",
+    "--color",
+    "never",
+    "--json",
+    "{prompt}"
+  ],
+  "environment_variables": {
+    "HTTP_PROXY": "http://127.0.0.1:{proxy_port}",
+    "HTTPS_PROXY": "http://127.0.0.1:{proxy_port}",
+    "ALL_PROXY": "http://127.0.0.1:{proxy_port}",
+    "NO_PROXY": "127.0.0.1,localhost",
+    "CODEX_CA_CERTIFICATE": "{ca_certificate}",
+    "SSL_CERT_FILE": "{ca_certificate}"
+  },
+  "timeout_seconds": 300,
+  "expected_vendor_hosts": [
+    "api.openai.com",
+    "chatgpt.com",
+    "auth.openai.com"
+  ],
+  "authentication_mode": "existing persisted user authentication only",
+  "model_identifier": null,
+  "approval_mode": "never",
+  "sandbox_mode": "read-only",
+  "notes": [
+    "Expected vendor hosts are reporting hints and do not determine capture success.",
+    "The model is not forced; record the model from observable client output or captured evidence when available.",
+    "The command keeps the read-only filesystem policy and never approval mode while selecting Codex's documented unelevated Windows sandbox fallback; this permits reads but does not grant writes.",
+    "CODEX_CA_CERTIFICATE and SSL_CERT_FILE are documented Codex trust-bundle variables. Proxy-variable behavior must be established empirically."
+  ],
+  "limitations": [
+    "The Microsoft Store desktop package observed during Phase 3A exposes no standalone CLI execution alias.",
+    "A runnable standalone codex command is required for live integration tests.",
+    "No credential, token, cookie, session identifier, account email, or organization identifier is stored here."
+  ]
+}
