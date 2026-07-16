@@ -3,9 +3,10 @@
 This directory contains a Windows-first, vendor-neutral harness for creating a
 deterministic Git canary repository, preserving HTTP and supported WebSocket
 payload evidence through mitmproxy, and analyzing copies of that evidence
-offline. Phase 2 does not execute or evaluate any vendor product. Phase 3A adds
-one Codex CLI adapter and keeps its live integration tests behind an explicit
-safety gate; it adds no other vendor adapter.
+offline. The generic runner has versioned adapters for Codex CLI, Claude Code,
+Gemini CLI, and Grok Build. Every live integration run remains behind a
+run-specific safety gate and explicit approval; the harness does not generalize
+one client, version, account, prompt, or run to another.
 
 Use the harness only with accounts, tools, and traffic you are authorized to
 inspect. Every canary is fake and deterministic; never put real credentials in
@@ -55,9 +56,8 @@ imports that exact certificate into `CurrentUser\Root`, and verifies its removal
 before deleting the temporary output. It never uses or changes the persistent
 CA under `~/.mitmproxy`.
 
-Phase 3A adapter tests are included in that discovery command and remain fully
-offline. Live Codex runs are separate; see
-[`docs/CODEX_TEST_PROTOCOL.md`](docs/CODEX_TEST_PROTOCOL.md).
+Adapter tests are included in that discovery command and remain fully offline.
+Live runs are separate; see the client protocols under [`docs/`](docs/).
 
 ## Create the deterministic canary repository
 
@@ -131,18 +131,24 @@ Invoke-WebRequest -Uri 'https://example.com/' -Proxy $proxy | Select-Object Stat
 
 No vendor command is included in this manual-capture example.
 
-## Phase 3A Codex adapter
+## Client adapters and safety preview
 
-The generic runner and the only current adapter are:
+The generic runner and current adapters are:
 
 - `scripts/Invoke-AgentCapture.ps1`
 - `adapters/codex.json`
+- `adapters/claude.json`
+- `adapters/gemini.json`
+- `adapters/grok.json`
 - `adapters/schema/adapter.schema.json`
 
-Preview the fixed Test A safety gate without launching Codex or mitmproxy:
+Preview a Test A safety gate without launching the client or mitmproxy:
 
 ```powershell
-pwsh -NoProfile -File .\scripts\Invoke-AgentCapture.ps1 -TestId A
+$adapter = '.\adapters\codex.json' # or claude.json, gemini.json, grok.json
+pwsh -NoProfile -File .\scripts\Invoke-AgentCapture.ps1 `
+  -TestId A `
+  -AdapterPath $adapter
 ```
 
 The preview executes only the adapter's local version command. It records the
@@ -201,6 +207,46 @@ files:
 ```powershell
 pwsh -NoProfile -File .\scripts\Test-EvidenceManifest.ps1 -RunDirectory .\captures\<run-id>
 ```
+
+## Evidence publication and reviewer reproduction
+
+Raw captures, generated canary repositories, and derived analysis outputs are
+intentionally excluded by `windows/.gitignore`. Decrypted request and response
+payloads can contain account-, prompt-, or repository-specific data even though
+the harness omits query values and authorization/cookie headers and redacts
+known credential patterns from client output. The binary evidence can also be
+large. Do not publish it without a separate sensitive-content review, consent
+from the account owner, and an explicit retention decision.
+
+Consequently, the run paths in `WINDOWS_COMPARISON.md` are local provenance
+identifiers, not links to files shipped in this repository. A reviewer cannot
+independently recompute those historical manifests from Git alone. The checked-in
+code, adapters, prompts, status rules, and tests support protocol-level
+reproduction with fresh evidence.
+
+To reproduce a result on an authorized Windows 11 test system:
+
+1. Complete the setup above and install/authenticate the selected official
+   client without placing credentials in the repository.
+2. Review the corresponding protocol under `docs/`. If the official executable
+   path differs, make a local adapter copy outside the repository and update
+   that copy; the version command will bind the observed version into the gate.
+3. Preview Test A with the command in the preceding section. Review the printed
+   executable, version, prompt, fresh canary path, capture/output paths, proxy
+   variables, certificate actions, and redacted command.
+4. If acceptable, run exactly the printed `approval_command`. This imports the
+   run's mitmproxy CA into `CurrentUser\Root`, sends vendor traffic, removes only
+   the certificate imported by that run, verifies the manifest, and produces
+   the versioned report.
+5. Repeat the preview/approval process separately for Tests B and C. Each
+   preview creates a fresh run ID, canary repository, capture directory, and
+   output root.
+6. Re-run manifest verification for each capture and compare the generated
+   `report/report.json` and `report/report.md` with the status definitions and
+   caveats in `WINDOWS_COMPARISON.md`.
+
+Keep reproduced evidence local unless a separate publication process defines
+redaction, access control, retention, and hash distribution.
 
 ## WebSocket boundary
 

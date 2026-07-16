@@ -1,6 +1,6 @@
 # Claude Code Windows test protocol
 
-## Installed and authentication state
+## Installed and tested state
 
 Anthropic's official native Windows installer was downloaded from
 `https://claude.ai/install.ps1`, inspected, and executed at user scope on
@@ -15,13 +15,16 @@ Observed local facts:
 
 - Executable: `C:\Users\jande\.local\bin\claude.exe`
 - Version: `2.1.210 (Claude Code)`
-- `claude auth status`: exit code 1, `loggedIn=false`, `authMethod=none`
+- Initial pre-authentication `claude auth status`: exit code 1,
+  `loggedIn=false`, `authMethod=none`
 - The installer directory is not currently on the inherited `PATH`; the adapter
   therefore uses the explicit executable path.
 
-No browser login was started and no model prompt was sent. Authentication must
-be completed interactively under separate approval before a live safety gate
-can be finalized. Do not print, inspect, copy, or store credential files.
+Authentication was later completed through Claude's first-party interactive
+flow. The preserved A-C runs succeeded with that persisted session; account
+details and credential material were not inspected, copied, or stored. Their
+final statuses are `CAPTURE_VALIDATED`, with the run-scoped findings and caveats
+recorded in `WINDOWS_COMPARISON.md`.
 
 Official sources:
 
@@ -48,19 +51,17 @@ claude.exe --safe-mode --strict-mcp-config --tools= --disable-slash-commands
   -p <approved-prompt>
 ```
 
-The validated Test A run used that tool-disabled command. For Test B, the
-current adapter changes only `--tools=` to `--tools=Read`. This permits the
-prompt's explicit `allowed.txt` read while leaving file discovery, search,
-shell, edit, write, and all other tools unavailable. Test C requires a separate
-gate review after Test B.
+The validated Test A run used that tool-disabled command. Tests B and C changed
+only `--tools=` to `--tools=Read`. This permitted their approved read tasks
+while leaving file discovery, search, shell, edit, write, and all other tools
+unavailable.
 
 Anthropic documents that native Windows sandboxing is not supported. The
 adapter therefore makes no OS-sandbox claim; the no-read Test A gate instead
-removes the client's tool surface. A future Test B gate will require a separate
-review because it must enable the minimum read capability needed for
-`allowed.txt`.
+removes the client's tool surface. Enabling `Read` is a CLI tool restriction,
+not a Windows path-level access boundary.
 
-Candidate capture variables, not established routing results:
+Run-scoped capture variables:
 
 ```text
 HTTP_PROXY=http://127.0.0.1:<port>
@@ -71,8 +72,9 @@ NODE_EXTRA_CA_CERTS=<mitmproxy-ca-pem>
 
 The adapter also disables the auto-updater, telemetry, error reporting,
 nonessential traffic, prompt history, Claude.ai MCP servers, and automatic IDE
-connection using documented controls. Proxy routing, CA trust, expected hosts,
-and direct-bypass behavior require empirical validation.
+connection using documented controls. These proxy and CA settings produced
+attributable decrypted traffic in the preserved A-C runs. Expected hosts,
+routing, trust, and direct-bypass conclusions remain specific to each run.
 
 ## Authentication and live-traffic gates
 
@@ -82,9 +84,9 @@ The documented first-party login command is interactive and may open a browser:
 & "$HOME\.local\bin\claude.exe" auth login
 ```
 
-Stop for user approval before running it. After login, verify only the
-non-identifying fields from `claude auth status`; do not print account or cached
-credential data. Then create a fresh Test A run ID, deterministic canary
-repository, capture directory, and versioned output root. Review the exact
-command, prompt, proxy and CA variables, timeouts, certificate import/removal,
-and port state before separately approving live traffic.
+For reproduction, stop for user approval before running it. After login, verify
+only the non-identifying fields from `claude auth status`; do not print account
+or cached credential data. Create a fresh run ID, deterministic canary
+repository, capture directory, and versioned output root for each test. Review
+the exact command, prompt, proxy and CA variables, timeouts, certificate
+import/removal, and port state before separately approving live traffic.

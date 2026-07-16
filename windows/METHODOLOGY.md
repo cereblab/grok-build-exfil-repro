@@ -2,12 +2,12 @@
 
 ## Scope
 
-Phase 2 validates the evidence pipeline, not a coding agent or vendor product.
-It adds no execution adapters and draws no benchmark or vendor conclusions.
-
-Phase 3A is a separate extension that adds one Codex CLI adapter. Its reports
-must not be generalized to other Codex surfaces, versions, accounts, settings,
-prompts, machines, or dates.
+Phase 2 validates the evidence pipeline rather than a coding agent or vendor
+product. Later phases add generic execution adapters and preserved runs for
+Codex CLI, Claude Code, Gemini CLI, and Grok Build. A report applies only to its
+recorded client surface, version, authentication mode, account, settings,
+prompt, machine, date, capture coverage, and successfully inspected evidence
+layers. It is not a general benchmark or product-safety conclusion.
 
 ## Raw versus derived evidence
 
@@ -22,10 +22,19 @@ Derived evidence is written to a different directory. Each operation records
 its raw source, parent derived artifact, operation, depth, known offset, output
 hash/size, success, and error. SHA-256 deduplication preserves every parent
 relationship. The analysis code refuses a derived directory inside the raw run.
-Phase 2 also rejects every non-empty derived directory. The Phase 3 runner uses
-an explicit narrow exception for only its newly reserved `control/`,
-`coverage.json`, and `client-execution.json`; any other preexisting entry still
-aborts extraction.
+A versioned output root separates preexisting run-control records under
+`control/` from the dedicated, initially empty `analysis/` directory used by
+extraction. Reports are written under `report/` only after analysis and
+reconciliation complete.
+
+Raw captures, generated canary repositories, and derived outputs are excluded
+from Git. Decrypted payloads can contain account-, prompt-, or
+repository-specific material and can be large even when metadata and client
+output are sanitized. The local manifest detects changes to preserved evidence,
+but reviewers without those ignored files cannot independently recompute a
+historical run's hashes. Reproducibility therefore means executing the
+checked-in protocol with fresh authorized evidence; it is not a claim that the
+historical evidence is distributed with the source tree.
 
 ## Extraction controls and opaque layers
 
@@ -78,15 +87,15 @@ as untrusted and never executed or added to the source repository.
 
 ## Capture coverage
 
-Phase 2 leaves capture status at `NOT_EVALUATED`. Future clients must each be
-tested for proxy use, TLS interception, direct bypass, and observation-window
-coverage. ETW and WFP can reveal connection paths and bypass but are not
-plaintext payload capture tools. GUI and CLI surfaces can use different network
-stacks and therefore require separate tests.
+An offline-only run leaves capture status at `NOT_EVALUATED`. Every live client
+run must separately test proxy use, TLS interception, direct bypass, and
+observation-window coverage. ETW and WFP can reveal connection paths and bypass
+but are not plaintext payload capture tools. GUI and CLI surfaces can use
+different network stacks and therefore require separate tests.
 
-For Phase 3A, a dedicated loopback proxy is applied only to the launched client
-environment. The root PID and observed descendants are polled with Windows
-process metadata and `Get-NetTCPConnection`. One reconciliation stage inspects
+For an approved live run, a dedicated loopback proxy is applied only to the
+launched client environment. The root PID and observed descendants are polled
+with Windows process metadata and `Get-NetTCPConnection`. One reconciliation stage inspects
 the launcher and mitmdump exit codes, final lifecycle status and journal,
 manifest validity, client launch, decrypted attributable traffic, and direct
 bypass result. `CAPTURE_VALIDATED` requires all of these to pass with no

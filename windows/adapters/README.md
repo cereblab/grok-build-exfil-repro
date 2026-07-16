@@ -1,14 +1,11 @@
 # Agent adapter format
 
 Adapters are versioned data files consumed by the generic
-`scripts/Invoke-AgentCapture.ps1` runner. `codex.json` is the Phase 3A adapter.
-`gemini.json` has an installed local executable and verified version/help syntax.
-An earlier Test A established that no authentication method was configured and
-remains preserved. A separate Gemini CLI 0.50.0 API-key-mode gate can now pass a
-user-scoped key without serializing it; proxy, CA, and authenticated behavior
-remain unverified until an approved live run.
-`claude.json` remains an offline preparation template.
-`grok.json` records the installed Grok Build 0.2.101 command surface.
+`scripts/Invoke-AgentCapture.ps1` runner. The checked-in adapters describe the
+tested Codex CLI 0.144.4, Claude Code 2.1.210, Gemini CLI 0.50.0 API-key-mode,
+and Grok Build 0.2.101 command surfaces. Their final A-C statuses and run-scoped
+limitations are recorded in `../../WINDOWS_COMPARISON.md`; failed preparatory
+runs remain distinct from those final results.
 No Antigravity adapter is included.
 
 The schema is `schema/adapter.schema.json` and the current schema version is
@@ -17,9 +14,11 @@ The schema is `schema/adapter.schema.json` and the current schema version is
 ```powershell
 Set-Location .\windows
 $env:PYTHONPATH = (Get-Location).Path
-python -m analysis.agent_runtime validate `
-  --adapter .\adapters\codex.json `
-  --schema .\adapters\schema\adapter.schema.json
+Get-ChildItem .\adapters\*.json | ForEach-Object {
+  python -m analysis.agent_runtime validate `
+    --adapter $_.FullName `
+    --schema .\adapters\schema\adapter.schema.json
+}
 ```
 
 An adapter defines an executable, version arguments, a noninteractive argument
@@ -93,18 +92,19 @@ pwsh -NoProfile -File .\scripts\Invoke-AgentCapture.ps1 -TestId A
 
 Only after reviewing the displayed executable, redacted command, paths, proxy
 environment, and prompt may a human run the exact printed `approval_command`.
-That command binds `-ApproveLiveTraffic` to the saved run ID; changed gate data
-is rejected.
+For a non-Codex adapter, add `-AdapterPath .\adapters\<client>.json`. The printed
+approval command binds `-ApproveLiveTraffic` to the saved run ID; changed gate
+data is rejected.
 
 ## Gemini, Claude, and Grok adapters
 
-Gemini CLI and Claude Code are installed at user scope using their vendors'
-official distribution methods. Claude Code uses Anthropic's native Windows
-binary at `C:\Users\jande\.local\bin\claude.exe`; local help and version behavior
-are verified, while `claude auth status` confirms it is not logged in. Its Test
-A command disables all built-in tools and customizations. Authentication,
-routing, certificate trust, and live behavior still require separate approval
-and empirical validation.
+Gemini CLI and Claude Code were installed at user scope using their vendors'
+official distribution methods. Claude's preserved authenticated A-C runs used
+the native Windows binary and the adapter's restricted tool configuration.
+Gemini's final A-C runs used the explicitly verified `gemini-api-key` selector;
+the key value was neither read nor serialized. Proxy routing, certificate trust,
+attribution, and direct-bypass conclusions remain specific to each preserved
+run and status.
 
 Grok Build uses the explicit user-scoped executable at
 `C:\Users\jande\.grok\bin\grok.exe`. Its validated Test A used single-turn JSON
@@ -116,3 +116,9 @@ sandbox documentation does not claim Windows enforcement. The corrected
 approved Test A returned `OK` and reconciled to `CAPTURE_VALIDATED`; proxy
 routing, CA trust, contacted hosts, and direct-bypass conclusions remain
 specific to that preserved run.
+
+Executable paths are observations from the test machine, not portable install
+locations. A reviewer reproducing a run must point the local adapter at the
+official executable, preview a fresh gate, and review any version/path change
+before approving traffic. Raw captures and derived outputs remain local and are
+not part of the adapter files.

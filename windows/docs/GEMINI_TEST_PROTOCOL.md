@@ -1,4 +1,4 @@
-# Gemini CLI offline preparation protocol
+# Gemini CLI Windows test protocol
 
 ## Status and boundaries
 
@@ -15,18 +15,24 @@ individual tier. Its raw evidence and original report remain preserved; the
 corrected derived report classifies `authentication_failed=true` and identifies
 the observed mode as cached Google sign-in. It is not an API-key-mode result.
 
-The current preparation is explicitly **Gemini CLI 0.50.0, API-key mode**. It
+The final tested mode is explicitly **Gemini CLI 0.50.0, API-key mode**. It
 is separate from the earlier unauthenticated result, the failed cached-Google-
 sign-in result, Google-account/OAuth authentication, and Antigravity. The
 preflight verifies both that a non-empty `GEMINI_API_KEY` exists in the Windows
 user environment and that `~/.gemini/settings.json` records
 `security.auth.selectedType=gemini-api-key`. It does not print, inspect, copy,
-hash, or record the key value or unrelated settings. Whether the key is accepted
-can be established only by the separately approved live Test A request.
+hash, or record the key value or unrelated settings. Successful approved A-C
+executions established that the key was accepted for those runs only.
+
+Final statuses were Test A `PARTIAL_CAPTURE`, Test B `PARTIAL_CAPTURE`, and Test
+C `CAPTURE_VALIDATED`. Test A lacked attributable client traffic under the
+existing criteria; Test B had incomplete process monitoring; Test C met the
+full reconciliation criteria. These statuses describe capture completeness,
+not product safety.
 
 The generic `scripts/Invoke-AgentCapture.ps1` runner and
-`adapters/gemini.json` are sufficient for preparation; no vendor-specific
-runner is added. Every eventual A, B, or C run must use a newly generated
+`adapters/gemini.json` are sufficient; no vendor-specific runner is added.
+Every reproduction of A, B, or C must use a newly generated
 canary repository, capture directory, and versioned output root.
 
 Before it creates a live-run gate, the generic runner resolves the harness
@@ -66,18 +72,17 @@ Installed local facts:
 
 The local help confirms `--prompt` headless mode, `--output-format json`,
 `--approval-mode plan`, `--skip-trust`, `--include-directories`, and
-`--sandbox`. `plan` is the documented read-only approval mode; the Test A
-template uses it and does not enable sandboxing, YOLO, auto-edit, or any allowed
-tools. This is the least-permissive documented configuration that is parseable
-offline. Its actual tool behavior has not been tested because that would submit
-a prompt to Gemini.
+`--sandbox`. `plan` is the documented read-only approval mode; the adapter uses
+it and does not enable sandboxing, YOLO, or auto-edit. The approved A-C runs
+exercised this configuration, but no native Windows sandbox was enabled or
+claimed.
 
 The official documents reviewed provide interactive sign-in and environment
 authentication methods, but no standalone noninteractive authentication-status
 command. Local help and a read-only installed-package search likewise found no
-such command. API-key presence can be checked locally, but authentication
-remains `UNVERIFIED` until approved traffic succeeds; no credential value is
-read into evidence or inspected.
+such command. API-key presence and the nonsecret persisted selector are checked
+locally; successful approved A-C executions established authentication for
+those runs without reading the credential value into evidence.
 
 Official sources:
 
@@ -86,16 +91,16 @@ Official sources:
 - <https://geminicli.com/docs/cli/cli-reference/>
 - <https://google-gemini.github.io/gemini-cli/docs/troubleshooting.html>
 
-## Future live-traffic gate
+## Reproduction safety gate
 
 Documented headless syntax is `gemini --prompt <prompt>` (or `-p`) and JSON
-output is requested with `--output-format json`. The prepared adapter also uses
-the documented `--approval-mode plan` and `--include-directories` flags. Before
-any live test, obtain approval to install, resolve the actual executable, run
-`--version` and `--help` offline, review exact supported approval behavior, and
-create a fresh generic-runner safety gate.
+output is requested with `--output-format json`. The adapter also uses the
+documented `--approval-mode plan` and `--include-directories` flags. Before any
+reproduction run, resolve the actual executable, run `--version` and `--help`
+offline, verify only key presence and the nonsecret selector, and create a fresh
+generic-runner safety gate.
 
-Candidate variables to test, not established routing facts:
+Run-scoped proxy and CA variables:
 
 ```text
 HTTP_PROXY=http://127.0.0.1:<port>
@@ -104,9 +109,9 @@ NODE_EXTRA_CA_CERTS=<mitmproxy-ca-pem>
 ```
 
 The official troubleshooting guide documents `NODE_EXTRA_CA_CERTS` for a
-custom root CA. Whether the CLI routes through the proxy and accepts the CA must
-be empirically shown with attributable capture and direct-bypass monitoring.
-The gate must also review the prompt, fresh paths, port availability, CA import
-and removal actions, expected timeout, redacted command, the explicit API-key
-mode label, and the boolean secret-availability result. It must never include
-the API key.
+custom root CA. The variables above produced decrypted traffic in the preserved
+A-C runs, but attribution and monitoring completeness varied by run and must be
+re-established for every reproduction. The gate must review the prompt, fresh
+paths, port availability, CA import and removal actions, expected timeout,
+redacted command, the explicit API-key mode label, and the boolean
+secret-availability result. It must never include the API key.

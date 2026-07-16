@@ -4,6 +4,12 @@ These Windows results are separate from the immutable upstream macOS comparison
 in `COMPARISON.md`. They apply only to the listed client version, account type,
 machine, settings, prompt, and capture method.
 
+The report paths below are local provenance identifiers. Raw captures, manifests,
+and derived reports are intentionally excluded from Git because decrypted
+payloads may contain sensitive account-, prompt-, or repository-specific data.
+Reviewers cannot recompute the historical run hashes from this repository alone;
+[`windows/README.md`](windows/README.md) documents fresh authorized reproduction.
+
 ## Scope
 
 - Client surfaces: OpenAI Codex CLI, Claude Code, Gemini CLI, and Grok Build, as listed by section
